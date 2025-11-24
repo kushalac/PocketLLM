@@ -1,0 +1,69 @@
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0:11434
+    restart: unless-stopped
+    # Pull the model after starting
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        ollama serve &
+        pid=$$!
+        echo "Waiting for Ollama to start..."
+        sleep 5
+        echo "Pulling model..."
+        ollama pull llama2:7b-chat
+        echo "Model ready!"
+        wait $$pid
+
+  mongodb:
+    image: mongo:7.0
+    container_name: mongodb
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: password
+    volumes:
+      - mongodb_data:/data/db
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:80"
+    environment:
+      - REACT_APP_API_URL=http://localhost:5000/api
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "5000:5000"
+    environment:
+      - NODE_ENV=production
+      - PORT=5000
+      - JWT_SECRET=your_secret_key_change_in_production
+      - MONGODB_URI=mongodb://root:password@mongodb:27017/pocketllm?authSource=admin
+      - OLLAMA_URL=http://ollama:11434/api/generate
+      - OLLAMA_MODEL=llama2:7b-chat
+    depends_on:
+      - mongodb
+      - ollama
+    restart: unless-stopped
+
+volumes:
+  ollama_data:
+  mongodb_data:
