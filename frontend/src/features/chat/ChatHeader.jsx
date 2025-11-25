@@ -3,7 +3,7 @@
 import { useNavigate } from "react-router-dom"
 import AuthService from "../../core/AuthService"
 
-export default function ChatHeader({ onLogout }) {
+export default function ChatHeader({ onLogout, onOpenDocs }) {
   const navigate = useNavigate()
   const user = AuthService.getUser()
 
@@ -13,6 +13,20 @@ export default function ChatHeader({ onLogout }) {
 
       <div className="flex items-center gap-4">
         <span className="text-gray-700">{user?.username}</span>
+
+        <button
+          onClick={onOpenDocs}
+          className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition"
+        >
+          Docs
+        </button>
+
+        <button
+          onClick={() => navigate("/history")}
+          className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition"
+        >
+          History
+        </button>
 
         <button
           onClick={() => navigate("/admin")}
