@@ -11,6 +11,10 @@ const chatSessionSchema = new mongoose.Schema({
     type: String,
     default: "New Chat",
   },
+  title_locked: {
+    type: Boolean,
+    default: false,
+  },
   created_at: {
     type: Date,
     default: Date.now,
@@ -18,6 +22,10 @@ const chatSessionSchema = new mongoose.Schema({
   updated_at: {
     type: Date,
     default: Date.now,
+  },
+  message_count: {
+    type: Number,
+    default: 0,
   },
 })
 
