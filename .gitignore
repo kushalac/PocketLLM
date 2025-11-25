@@ -44,3 +44,4 @@ Thumbs.db
 # Docker/compose scratch
 **/tmp/
 .docker/
+docker-compose.override.yml
