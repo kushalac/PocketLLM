@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 
-export default function PromptInput({ onSubmit, disabled }) {
+export default function PromptInput({ onSubmit, disabled, onStop, isStreaming }) {
   const [input, setInput] = useState("")
 
   const handleSubmit = (e) => {
@@ -24,13 +24,23 @@ export default function PromptInput({ onSubmit, disabled }) {
           disabled={disabled}
           className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100"
         />
-        <button
-          type="submit"
-          disabled={disabled || !input.trim()}
-          className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 transition font-medium"
-        >
-          Send
-        </button>
+        {isStreaming ? (
+          <button
+            type="button"
+            onClick={onStop}
+            className="px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition font-medium"
+          >
+            Stop
+          </button>
+        ) : (
+          <button
+            type="submit"
+            disabled={disabled || !input.trim()}
+            className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 transition font-medium"
+          >
+            Send
+          </button>
+        )}
       </div>
     </form>
   )
