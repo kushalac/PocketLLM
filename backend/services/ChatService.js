@@ -2,14 +2,29 @@ const { v4: uuidv4 } = require("uuid")
 const ChatSession = require("../models/ChatSession")
 const Message = require("../models/Message")
 
+const DEFAULT_TITLE = "New Chat"
+
+const buildTitleFromContent = (content = "") => {
+  const cleaned = content.replace(/\s+/g, " ").trim()
+  if (!cleaned) return null
+  const words = cleaned.split(" ").slice(0, 8)
+  let draft = words.join(" ")
+  if (draft.length > 60) {
+    draft = `${draft.slice(0, 57)}...`
+  }
+  return draft
+}
+
 class ChatService {
-  async createSession(userId, title = "New Chat") {
+  async createSession(userId, title = DEFAULT_TITLE) {
     const sessionId = uuidv4()
 
     const session = new ChatSession({
       _id: sessionId,
       user_id: userId,
       title,
+      message_count: 0,
+      title_locked: false,
     })
     await session.save()
 
@@ -29,6 +44,7 @@ class ChatService {
     if (!session) throw new Error("Session not found")
 
     session.title = title
+    session.title_locked = true
     session.updated_at = new Date()
     await session.save()
 
@@ -45,8 +61,16 @@ class ChatService {
     return true
   }
 
-  async addMessage(sessionId, userId, role, content) {
+  async addMessage(sessionId, userId, role, content, metadata = {}) {
+    const session = await this.getSession(sessionId, userId)
+    if (!session) {
+      throw new Error("Session not found")
+    }
+
     const messageId = uuidv4()
+    const evidencePayload = "evidence" in metadata ? { evidence: metadata.evidence } : {}
+    const statusPayload = metadata.status ? { status: metadata.status } : {}
+    const metaPayload = metadata.meta ? { meta: metadata.meta } : {}
 
     const message = new Message({
       _id: messageId,
@@ -54,19 +78,65 @@ class ChatService {
       user_id: userId,
       role,
       content,
+      ...evidencePayload,
+      ...statusPayload,
+      ...metaPayload,
     })
     await message.save()
 
-    await ChatSession.updateOne({ _id: sessionId }, { updated_at: new Date() })
+    session.updated_at = new Date()
+    session.message_count = (session.message_count || 0) + 1
+
+    if (role === "user" && !session.title_locked) {
+      const generatedTitle = buildTitleFromContent(content)
+      if (generatedTitle && (session.message_count <= 1 || session.title === DEFAULT_TITLE)) {
+        session.title = generatedTitle
+      }
+    }
+
+    await session.save()
 
     return messageId
   }
 
   async getMessages(sessionId, userId) {
-    return await Message.find({
+    // CRITICAL: This ensures messages are ONLY returned for the specific session
+    const messages = await Message.find({
       session_id: sessionId,
       user_id: userId,
     }).sort({ created_at: 1 })
+
+    return messages
+  }
+
+  async getConversationContext(sessionId, userId, limit = 8) {
+   
+    const messages = await Message.find({
+      session_id: sessionId,
+      user_id: userId,
+    })
+      .sort({ created_at: -1 })
+      .limit(limit)
+
+    return messages.reverse()
+  }
+
+  async getRecentUserSnippets(sessionId, userId, limit = 2) {
+  
+    const messages = await Message.find({
+      session_id: sessionId,
+      user_id: userId,
+      role: "user",
+    })
+      .sort({ created_at: -1 })
+      .limit(limit)
+
+    return messages.map((msg, idx) => ({
+      source: "Conversation",
+      snippet: msg.content.slice(0, 200),
+      citation: `message#${msg._id || idx}`,
+      confidence: 0.3,
+    }))
   }
 
   async exportSession(sessionId, userId) {
@@ -81,8 +151,39 @@ class ChatService {
         title: session.title,
         createdAt: session.created_at,
         updatedAt: session.updated_at,
+        messageCount: session.message_count ?? 0,
       },
       messages,
+    }
+  }
+
+  // NEW METHOD: Clear all messages from a session (useful for testing)
+  async clearSessionMessages(sessionId, userId) {
+    const session = await this.getSession(sessionId, userId)
+    if (!session) throw new Error("Session not found")
+
+    await Message.deleteMany({ 
+      session_id: sessionId,
+      user_id: userId 
+    })
+
+    session.message_count = 0
+    session.updated_at = new Date()
+    await session.save()
+
+    return true
+  }
+
+  async verifySessionIsolation(sessionId, userId) {
+    const messages = await this.getMessages(sessionId, userId)
+    const allMessages = await Message.find({ user_id: userId })
+    
+    return {
+      sessionId,
+      messagesInSession: messages.length,
+      totalMessages: allMessages.length,
+      otherSessionMessages: allMessages.length - messages.length,
+      isIsolated: messages.every(msg => msg.session_id === sessionId)
     }
   }
 }

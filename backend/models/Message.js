@@ -21,10 +21,27 @@ const messageSchema = new mongoose.Schema({
     type: String,
     required: true,
   },
+  status: {
+    type: String,
+    enum: ["completed", "aborted"],
+    default: "completed",
+  },
+  meta: {
+    type: mongoose.Schema.Types.Mixed,
+    default: {},
+  },
   created_at: {
     type: Date,
     default: Date.now,
   },
+  evidence: [
+    {
+      source: String,
+      snippet: String,
+      citation: String,
+      confidence: Number,
+    },
+  ],
 })
 
 module.exports = mongoose.model("Message", messageSchema)
