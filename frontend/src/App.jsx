@@ -4,6 +4,7 @@ import Login from "./features/auth/Login"
 import Register from "./features/auth/Register"
 import ChatInterface from "./features/chat/ChatInterface"
 import AdminDashboard from "./features/admin/AdminDashboard"
+import HistoryPage from "./features/history/HistoryPage"
 
 function App() {
   return (
@@ -17,6 +18,15 @@ function App() {
           element={
             <PrivateRoute>
               <ChatInterface />
+            </PrivateRoute>
+          }
+        />
+
+        <Route
+          path="/history"
+          element={
+            <PrivateRoute>
+              <HistoryPage />
             </PrivateRoute>
           }
         />
