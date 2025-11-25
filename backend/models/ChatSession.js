@@ -1,5 +1,6 @@
 const mongoose = require("mongoose")
 
+// Chat session schema - represents a chat session which can have multiple messages
 const chatSessionSchema = new mongoose.Schema({
   _id: String,
   user_id: {
