@@ -6,13 +6,19 @@ import AuthService from "../../core/AuthService"
 export default function ChatHeader({ onLogout, onOpenDocs }) {
   const navigate = useNavigate()
   const user = AuthService.getUser()
+  
+  // Check if user is actually an admin
+  const isAdmin = user?.is_admin === true
 
   return (
     <header className="bg-white border-b border-gray-200 px-6 py-4 flex justify-between items-center">
       <h1 className="text-2xl font-bold text-gray-800">PocketLLMs</h1>
 
       <div className="flex items-center gap-4">
-        <span className="text-gray-700">{user?.username}</span>
+        <span className="text-gray-700">
+          {user?.username}
+          {isAdmin && <span className="ml-2 text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">Admin</span>}
+        </span>
 
         <button
           onClick={onOpenDocs}
@@ -28,12 +34,14 @@ export default function ChatHeader({ onLogout, onOpenDocs }) {
           History
         </button>
 
-        <button
-          onClick={() => navigate("/admin")}
-          className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition"
-        >
-          Admin
-        </button>
+        {isAdmin && (
+          <button
+            onClick={() => navigate("/admin")}
+            className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition"
+          >
+            Admin
+          </button>
+        )}
 
         <button onClick={onLogout} className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition">
           Logout
