@@ -1,20 +1,43 @@
 import apiClient from "./ApiService"
 import AuthService from "./AuthService"
+import IndexedDBCache from "./IndexedDBCache"
 
 const API_URL = process.env.REACT_APP_API_URL || "http://localhost:5000/api"
 
 class ChatSessionService {
-  startSession() {
-    return apiClient.post("/chat/start").then((res) => {
-      return res.data.sessionId
-    })
+  constructor() {
+    this.sessionsCacheKey = "chat_sessions"
   }
 
-  getSessions() {
-    return apiClient.get("/chat/sessions").then((res) => {
+  async startSession() {
+    const res = await apiClient.post("/chat/start")
+    const sessionId = res.data.sessionId
+    
+    // Refresh sessions cache
+    this.getSessions(true)
+    
+    return sessionId
+  }
+
+  async getSessions(forceRefresh = false) {
+    try {
+      // Try to get from cache first if not forcing refresh
+      if (!forceRefresh) {
+        const cached = await IndexedDBCache.getSessions()
+        if (cached && cached.length > 0) {
+          console.log(`Loaded ${cached.length} sessions from IndexedDB cache`)
+          // Still fetch in background to update cache
+          this._refreshSessionsInBackground()
+          return cached
+        }
+      }
+
+      // Fetch from API
+      const res = await apiClient.get("/chat/sessions")
       const sessions = res.data.sessions || []
-      // Normalize session objects to ensure frontend uses `id` consistently
-      return sessions.map((s) => ({
+      
+      // Normalize session objects
+      const normalized = sessions.map((s) => ({
         ...s,
         id: s.id || s._id || s._id?._id || null,
         title: s.title || s.name || "New Chat",
@@ -22,7 +45,44 @@ class ChatSessionService {
         updated_at: s.updated_at || s.updatedAt,
         message_count: s.message_count ?? s.messageCount ?? 0,
       }))
-    })
+
+      // Save to cache
+      await IndexedDBCache.saveSessions(normalized)
+      
+      return normalized
+    } catch (error) {
+      console.error("Failed to get sessions:", error)
+      
+      // Fallback to cache on error
+      const cached = await IndexedDBCache.getSessions()
+      if (cached && cached.length > 0) {
+        console.log("Using cached sessions due to API error")
+        return cached
+      }
+      
+      throw error
+    }
+  }
+
+  async _refreshSessionsInBackground() {
+    try {
+      const res = await apiClient.get("/chat/sessions")
+      const sessions = res.data.sessions || []
+      
+      const normalized = sessions.map((s) => ({
+        ...s,
+        id: s.id || s._id || s._id?._id || null,
+        title: s.title || s.name || "New Chat",
+        created_at: s.created_at || s.createdAt,
+        updated_at: s.updated_at || s.updatedAt,
+        message_count: s.message_count ?? s.messageCount ?? 0,
+      }))
+
+      await IndexedDBCache.saveSessions(normalized)
+      console.log("Background refresh: sessions cache updated")
+    } catch (error) {
+      console.error("Background refresh failed:", error)
+    }
   }
 
   // Use fetch for streaming responses so the caller can read response.body.getReader()
@@ -41,12 +101,22 @@ class ChatSessionService {
     return res
   }
 
-  renameSession(sessionId, title) {
-    return apiClient.patch(`/chat/rename/${sessionId}`, { title })
+  async renameSession(sessionId, title) {
+    const res = await apiClient.patch(`/chat/rename/${sessionId}`, { title })
+    
+    // Update cache
+    await this.getSessions(true)
+    
+    return res
   }
 
-  deleteSession(sessionId) {
-    return apiClient.delete(`/chat/session/${sessionId}`)
+  async deleteSession(sessionId) {
+    const res = await apiClient.delete(`/chat/session/${sessionId}`)
+    
+    // Remove from cache
+    await IndexedDBCache.deleteSession(sessionId)
+    
+    return res
   }
 
   exportSession(sessionId) {
@@ -72,11 +142,59 @@ class ChatSessionService {
     return { blob, filename }
   }
 
-  async getMessages(sessionId) {
-    // Reuse the export endpoint which returns session + messages
-    const res = await apiClient.get(`/chat/export/${sessionId}`)
-    // messages are returned under res.data.messages
-    return res.data.messages || []
+  async getMessages(sessionId, forceRefresh = false) {
+    try {
+      // Try to get from cache first if not forcing refresh
+      if (!forceRefresh) {
+        const cached = await IndexedDBCache.getMessages(sessionId)
+        if (cached && cached.length > 0) {
+          console.log(`Loaded ${cached.length} messages from IndexedDB cache for session ${sessionId}`)
+          // Still fetch in background to update cache
+          this._refreshMessagesInBackground(sessionId)
+          return cached
+        }
+      }
+
+      // Fetch from API
+      const res = await apiClient.get(`/chat/export/${sessionId}`)
+      const messages = res.data.messages || []
+      
+      // Save to cache
+      await IndexedDBCache.saveMessages(sessionId, messages)
+      
+      return messages
+    } catch (error) {
+      console.error("Failed to get messages:", error)
+      
+      // Fallback to cache on error
+      const cached = await IndexedDBCache.getMessages(sessionId)
+      if (cached && cached.length > 0) {
+        console.log("Using cached messages due to API error")
+        return cached
+      }
+      
+      throw error
+    }
+  }
+
+  async _refreshMessagesInBackground(sessionId) {
+    try {
+      const res = await apiClient.get(`/chat/export/${sessionId}`)
+      const messages = res.data.messages || []
+      
+      await IndexedDBCache.saveMessages(sessionId, messages)
+      console.log(`Background refresh: messages cache updated for session ${sessionId}`)
+    } catch (error) {
+      console.error("Background refresh failed:", error)
+    }
+  }
+
+  async clearCache() {
+    await IndexedDBCache.clearAll()
+  }
+
+  async getCacheStats() {
+    return await IndexedDBCache.getStats()
   }
 }
 
