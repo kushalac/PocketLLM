@@ -2,6 +2,18 @@ const ChatService = require("../services/ChatService")
 const LLMService = require("../services/LLMService")
 const MetricsService = require("../services/MetricsService")
 const LogService = require("../services/LogService")
+const DocumentService = require("../services/DocumentService")
+
+const buildPromptFromHistory = (messages = []) => {
+  if (!messages.length) return null
+  const transcript = messages
+    .map((msg) => {
+      const speaker = msg.role === "user" ? "User" : "Assistant"
+      return `${speaker}: ${msg.content}`
+    })
+    .join("\n")
+  return `${transcript}\nAssistant:`
+}
 
 const startSession = async (req, res) => {
   try {
@@ -45,9 +57,17 @@ const sendMessage = async (req, res) => {
 
     const startTime = Date.now()
     let fullResponse = ""
+    const abortController = new AbortController()
+    const handleAbort = () => abortController.abort()
+    req.on("close", handleAbort)
+    let streamCancelled = false
+    let shouldPersistAssistant = false
+
+    let conversationPrompt = await ChatService.getConversationContext(sessionId, req.user.id, 8)
+    conversationPrompt = buildPromptFromHistory(conversationPrompt) || `User: ${message}\nAssistant:`
 
     try {
-      for await (const chunk of LLMService.streamResponse(message)) {
+      for await (const chunk of LLMService.streamResponse(conversationPrompt, { signal: abortController.signal })) {
         // Only write to the response if it is still writable
         if (!res.writableEnded) {
           res.write(`data: ${JSON.stringify({ content: chunk })}\n\n`)
@@ -57,25 +77,52 @@ const sendMessage = async (req, res) => {
 
       const responseTime = Date.now() - startTime
       MetricsService.recordResponseTime(responseTime)
-
-      await ChatService.addMessage(sessionId, req.user.id, "assistant", fullResponse)
-
-      if (!res.writableEnded) {
-        res.write("data: [DONE]\n\n")
-        res.end()
-      }
-
-      await LogService.log("info", `Message sent in session ${sessionId}`)
+      shouldPersistAssistant = true
     } catch (err) {
-      console.error("Streaming error:", err)
-      if (!res.writableEnded) {
-        try {
-          res.write(`data: ${JSON.stringify({ error: err.message })}\n\n`)
-          res.end()
-        } catch (writeErr) {
-          console.error("Error writing error response (response may already be closed):", writeErr)
+      if (abortController.signal.aborted) {
+        streamCancelled = true
+        shouldPersistAssistant = Boolean(fullResponse)
+      } else {
+        console.error("Streaming error:", err)
+        if (!res.writableEnded) {
+          try {
+            res.write(`data: ${JSON.stringify({ error: err.message })}\n\n`)
+            res.end()
+          } catch (writeErr) {
+            console.error("Error writing error response (response may already be closed):", writeErr)
+          }
         }
       }
+    }
+    req.off("close", handleAbort)
+
+    if (fullResponse && shouldPersistAssistant) {
+      let evidence = await DocumentService.searchDocuments(req.user.id, message)
+      if (!evidence.length) {
+        evidence = await ChatService.getRecentUserSnippets(sessionId, req.user.id)
+      }
+      await ChatService.addMessage(sessionId, req.user.id, "assistant", fullResponse, {
+        evidence,
+        status: streamCancelled ? "aborted" : "completed",
+        ...(streamCancelled ? { meta: { stoppedByUser: true } } : {}),
+      })
+      await LogService.log("info", `Message sent in session ${sessionId}`)
+    } else if (streamCancelled && !fullResponse) {
+      await ChatService.addMessage(
+        sessionId,
+        req.user.id,
+        "assistant",
+        "Response stopped before the model generated an answer.",
+        {
+          status: "aborted",
+          meta: { stoppedByUser: true, emptyResponse: true },
+        },
+      )
+    }
+
+    if (!res.writableEnded && !streamCancelled) {
+      res.write("data: [DONE]\n\n")
+      res.end()
     }
   } catch (err) {
     res.status(500).json({ error: err.message })
@@ -117,4 +164,44 @@ const exportSession = async (req, res) => {
   }
 }
 
-module.exports = { startSession, getSessions, sendMessage, renameSession, deleteSession, exportSession }
+const uploadDocument = async (req, res) => {
+  try {
+    const { title, content, tags } = req.body
+    const doc = await DocumentService.createDocument(req.user.id, { title, content, tags })
+    MetricsService.recordDocumentUpload()
+    res.status(201).json({ document: doc })
+  } catch (err) {
+    res.status(400).json({ error: err.message })
+  }
+}
+
+const listDocuments = async (req, res) => {
+  try {
+    const documents = await DocumentService.listDocuments(req.user.id)
+    res.json({ documents })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+}
+
+const deleteDocument = async (req, res) => {
+  try {
+    const { documentId } = req.params
+    await DocumentService.deleteDocument(req.user.id, documentId)
+    res.json({ message: "Document deleted" })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+}
+
+module.exports = {
+  startSession,
+  getSessions,
+  sendMessage,
+  renameSession,
+  deleteSession,
+  exportSession,
+  uploadDocument,
+  listDocuments,
+  deleteDocument,
+}

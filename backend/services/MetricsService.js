@@ -5,6 +5,8 @@ class MetricsService {
       totalChats: 0,
       totalMessages: 0,
       averageResponseTime: 0,
+      lastResponseTime: 0,
+      documentsUploaded: 0,
       responseTimes: [],
     }
   }
@@ -25,12 +27,21 @@ class MetricsService {
     this.metrics.responseTimes.push(time)
     this.metrics.averageResponseTime =
       this.metrics.responseTimes.reduce((a, b) => a + b, 0) / this.metrics.responseTimes.length
+    this.metrics.lastResponseTime = time
+  }
+
+  recordDocumentUpload() {
+    this.metrics.documentsUploaded++
   }
 
   getMetrics() {
+    const times = this.metrics.responseTimes.slice(-100)
+    const sorted = [...times].sort((a, b) => a - b)
+    const p95Index = sorted.length ? Math.floor(0.95 * (sorted.length - 1)) : 0
     return {
       ...this.metrics,
-      responseTimes: this.metrics.responseTimes.slice(-100), // Keep last 100
+      responseTimes: times,
+      p95ResponseTime: sorted[p95Index] || 0,
     }
   }
 
@@ -40,6 +51,8 @@ class MetricsService {
       totalChats: 0,
       totalMessages: 0,
       averageResponseTime: 0,
+      lastResponseTime: 0,
+      documentsUploaded: 0,
       responseTimes: [],
     }
   }

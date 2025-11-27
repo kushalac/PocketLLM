@@ -6,7 +6,8 @@ class LLMService {
     this.model = process.env.OLLAMA_MODEL || "llama2:7b-chat"
   }
 
-  async *streamResponse(prompt, systemPrompt = "") {
+  async *streamResponse(prompt, options = {}) {
+    const { systemPrompt = "You are a helpful AI assistant.", signal } = options
     try {
       const response = await axios.post(
         this.ollamaUrl,
@@ -14,11 +15,12 @@ class LLMService {
           model: this.model,
           prompt: prompt,
           stream: true,
-          system: systemPrompt || "You are a helpful AI assistant.",
+          system: systemPrompt,
         },
         {
           responseType: "stream",
           timeout: 300000, // 5 minutes timeout
+          signal,
         },
       )
 
@@ -39,6 +41,9 @@ class LLMService {
         }
       }
     } catch (error) {
+      if (signal?.aborted) {
+        throw new Error("Stream aborted by client")
+      }
       console.error("Ollama streaming error:", error.message)
       throw new Error(`Failed to get response from Ollama: ${error.message}`)
     }
@@ -48,7 +53,7 @@ class LLMService {
   async getResponse(prompt, systemPrompt = "") {
     try {
       let fullResponse = ""
-      for await (const chunk of this.streamResponse(prompt, systemPrompt)) {
+      for await (const chunk of this.streamResponse(prompt, { systemPrompt })) {
         fullResponse += chunk
       }
       return fullResponse

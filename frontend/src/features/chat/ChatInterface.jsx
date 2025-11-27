@@ -1,57 +1,130 @@
 "use client"
 
-import { useState, useEffect } from "react"
-import { useNavigate } from "react-router-dom"
+import { useState, useEffect, useRef, useCallback } from "react"
+import { useNavigate, useSearchParams } from "react-router-dom"
 import AuthService from "../../core/AuthService"
 import ChatSessionService from "../../core/ChatSessionService"
 import ChatHeader from "./ChatHeader"
 import ChatSidebar from "./ChatSidebar"
 import MessageList from "./MessageList"
 import PromptInput from "./PromptInput"
+import DocsPanel from "./DocsPanel"
 
 export default function ChatInterface() {
   const [sessions, setSessions] = useState([])
   const [activeSessionId, setActiveSessionId] = useState(null)
   const [messages, setMessages] = useState([])
-  const [loading, setLoading] = useState(false)
+  const [isStreaming, setIsStreaming] = useState(false)
   const [error, setError] = useState("")
+  const [showDocs, setShowDocs] = useState(false)
+  const [streamController, setStreamController] = useState(null)
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const activeSessionRef = useRef(null)
+  const streamingSessionRef = useRef(null)
+  const messagesCacheRef = useRef({})
+
+  const updateMessagesForSession = useCallback((sessionId, updater) => {
+    if (!sessionId) return
+    const prevMessages = messagesCacheRef.current[sessionId] || []
+    const nextMessages = typeof updater === "function" ? updater(prevMessages) : updater
+    messagesCacheRef.current[sessionId] = nextMessages
+
+    if (activeSessionRef.current === sessionId) {
+      setMessages(nextMessages)
+    }
+  }, [])
 
   useEffect(() => {
     loadSessions()
   }, [])
 
-  // Load messages whenever the active session changes
   useEffect(() => {
-    const fetchMessages = async () => {
-      if (!activeSessionId) {
+    const requestedSession = searchParams.get("session")
+    if (requestedSession && requestedSession !== activeSessionRef.current) {
+      setActiveSession(requestedSession)
+      return
+    }
+
+    if (!requestedSession && !activeSessionRef.current && sessions.length > 0) {
+      setActiveSession(sessions[0].id)
+    }
+  }, [searchParams, sessions])
+
+  const fetchMessages = useCallback(
+    async (sessionId) => {
+      if (!sessionId) {
         setMessages([])
         return
       }
 
       try {
-        const msgs = await ChatSessionService.getMessages(activeSessionId)
-        // Normalize messages to { id, role, content }
+        const msgs = await ChatSessionService.getMessages(sessionId)
         const formatted = (msgs || []).map((m) => ({
           id: m._id || m.id || Date.now(),
           role: m.role,
           content: m.content,
+          evidence: m.evidence || [],
+          status: m.status || "completed",
+          meta: m.meta || {},
         }))
-        setMessages(formatted)
+        updateMessagesForSession(sessionId, formatted)
       } catch (err) {
-        setError('Failed to load messages')
+        setError("Failed to load messages")
       }
-    }
+    },
+    [updateMessagesForSession],
+  )
 
-    fetchMessages()
-  }, [activeSessionId])
+  useEffect(() => {
+    if (!activeSessionId) {
+      setMessages([])
+      return
+    }
+    const cached = messagesCacheRef.current[activeSessionId]
+    if (cached) {
+      setMessages(cached)
+    } else {
+      setMessages([])
+    }
+    fetchMessages(activeSessionId)
+  }, [activeSessionId, fetchMessages])
+
+  const setActiveSession = (sessionId) => {
+    setActiveSessionId(sessionId)
+    activeSessionRef.current = sessionId
+    if (sessionId) {
+      setSearchParams({ session: sessionId })
+    } else {
+      setSearchParams({})
+    }
+  }
 
   const loadSessions = async () => {
     try {
       const data = await ChatSessionService.getSessions()
       setSessions(data)
-      // Only set a default active session if none is already selected.
-      setActiveSessionId((curr) => (curr ? curr : data.length > 0 ? data[0].id : null))
+      const requestedSession = searchParams.get("session")
+      const isRequestedValid = requestedSession && data.some((s) => s.id === requestedSession)
+      const current = activeSessionRef.current
+      const isCurrentValid = current && data.some((s) => s.id === current)
+
+      let nextSessionId = null
+      if (isCurrentValid) {
+        nextSessionId = current
+      } else if (isRequestedValid) {
+        nextSessionId = requestedSession
+      }
+
+      if (!nextSessionId && data.length > 0) {
+        nextSessionId = data[0].id
+      }
+
+      if (nextSessionId !== activeSessionRef.current) {
+        setActiveSession(nextSessionId)
+      } else if (!nextSessionId) {
+        setActiveSession(null)
+      }
     } catch (err) {
       setError("Failed to load sessions")
     }
@@ -60,7 +133,7 @@ export default function ChatInterface() {
   const handleNewChat = async () => {
     try {
       const sessionId = await ChatSessionService.startSession()
-      setActiveSessionId(sessionId)
+      setActiveSession(sessionId)
       setMessages([])
       await loadSessions()
     } catch (err) {
@@ -71,16 +144,24 @@ export default function ChatInterface() {
   const handleSendMessage = async (message) => {
     if (!activeSessionId) return
 
-    const userMessage = { role: "user", content: message, id: Date.now() }
-    setMessages((prev) => [...prev, userMessage])
-    setLoading(true)
+    const currentSessionId = activeSessionId
+    const userMessage = { role: "user", content: message, id: Date.now(), status: "completed", evidence: [] }
+    updateMessagesForSession(currentSessionId, (prev) => [...prev, userMessage])
+    setIsStreaming(true)
     setError("")
 
+    if (streamController) {
+      streamController.abort()
+    }
+
+    const abortController = new AbortController()
+    setStreamController(abortController)
+    streamingSessionRef.current = currentSessionId
+
     try {
-      const response = await ChatSessionService.sendMessage(activeSessionId, message)
+      const response = await ChatSessionService.sendMessage(currentSessionId, message, abortController.signal)
 
       let assistantMessage = ""
-      // For fetch responses the stream reader is on `response.body`.
       const reader = response?.body?.getReader?.()
 
       if (reader) {
@@ -100,29 +181,52 @@ export default function ChatInterface() {
               try {
                 const parsed = JSON.parse(data)
                 assistantMessage += parsed.content || ""
-                setMessages((prev) => {
+                if (streamingSessionRef.current !== currentSessionId) {
+                  continue
+                }
+                updateMessagesForSession(currentSessionId, (prev) => {
                   const updated = [...prev]
-                  if (updated[updated.length - 1]?.role === "assistant") {
-                    updated[updated.length - 1].content = assistantMessage
+                  const last = updated[updated.length - 1]
+                  if (last?.role === "assistant" && last.status === "streaming") {
+                    updated[updated.length - 1] = { ...last, content: assistantMessage }
                   } else {
-                    updated.push({ role: "assistant", content: assistantMessage, id: Date.now() })
+                    updated.push({
+                      role: "assistant",
+                      content: assistantMessage,
+                      id: Date.now(),
+                      status: "streaming",
+                      evidence: [],
+                    })
                   }
                   return updated
                 })
               } catch (e) {
-                // Continue on parse error
+                // Ignore parse errors for partial chunks
               }
             }
           }
         }
       }
-
-      await loadSessions()
     } catch (err) {
-      setError("Failed to send message")
+      if (err.name === "AbortError") {
+        setError("")
+      } else {
+        setError("Failed to send message")
+      }
     } finally {
-      setLoading(false)
+      loadSessions()
+      fetchMessages(currentSessionId)
+      setIsStreaming(false)
+      setStreamController(null)
+      streamingSessionRef.current = null
     }
+  }
+
+  const handleStopStreaming = () => {
+    if (streamController) {
+      streamController.abort()
+    }
+    streamingSessionRef.current = null
   }
 
   const handleRenameSession = async (sessionId, newTitle) => {
@@ -138,7 +242,7 @@ export default function ChatInterface() {
     try {
       await ChatSessionService.deleteSession(sessionId)
       if (activeSessionId === sessionId) {
-        setActiveSessionId(null)
+        setActiveSession(null)
         setMessages([])
       }
       await loadSessions()
@@ -157,20 +261,20 @@ export default function ChatInterface() {
       <ChatSidebar
         sessions={sessions}
         activeSessionId={activeSessionId}
-        onSelectSession={setActiveSessionId}
+        onSelectSession={setActiveSession}
         onNewChat={handleNewChat}
         onRenameSession={handleRenameSession}
         onDeleteSession={handleDeleteSession}
       />
 
       <div className="flex-1 flex flex-col">
-        <ChatHeader onLogout={handleLogout} />
+        <ChatHeader onLogout={handleLogout} onOpenDocs={() => setShowDocs(true)} />
 
         <div className="flex-1 overflow-hidden">
           {activeSessionId ? (
             <div className="h-full flex flex-col">
-              <MessageList messages={messages} loading={loading} />
-              <PromptInput onSubmit={handleSendMessage} disabled={loading} />
+              <MessageList messages={messages} loading={isStreaming} />
+              <PromptInput onSubmit={handleSendMessage} disabled={isStreaming} isStreaming={isStreaming} onStop={handleStopStreaming} />
             </div>
           ) : (
             <div className="h-full flex items-center justify-center">
@@ -189,6 +293,8 @@ export default function ChatInterface() {
 
         {error && <div className="bg-red-50 border-t border-red-200 p-4 text-red-700">{error}</div>}
       </div>
+      <DocsPanel open={showDocs} onClose={() => setShowDocs(false)} />
     </div>
   )
 }
+
