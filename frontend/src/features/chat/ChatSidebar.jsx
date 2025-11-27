@@ -10,6 +10,7 @@ export default function ChatSidebar({
   onNewChat,
   onRenameSession,
   onDeleteSession,
+  isCreatingSession = false,
 }) {
   const [renamingId, setRenamingId] = useState(null)
   const [newTitle, setNewTitle] = useState("")
@@ -31,9 +32,10 @@ export default function ChatSidebar({
       <div className="p-4 border-b border-gray-200">
         <button
           onClick={onNewChat}
-          className="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 font-medium transition"
+          disabled={isCreatingSession}
+          className="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 font-medium transition disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          + New Chat
+          {isCreatingSession ? "Creating..." : "+ New Chat"}
         </button>
       </div>
 
