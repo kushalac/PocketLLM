@@ -14,7 +14,7 @@ const getLogs = async (req, res) => {
 
 const getMetrics = async (req, res) => {
   try {
-    const metrics = MetricsService.getMetrics()
+    const metrics = await MetricsService.getMetrics()
     res.json({ metrics })
   } catch (err) {
     res.status(500).json({ error: err.message })
@@ -50,7 +50,7 @@ const clearLogs = async (req, res) => {
 
 const resetMetrics = async (req, res) => {
   try {
-    MetricsService.reset()
+    await MetricsService.reset()
     res.json({ message: "Metrics reset" })
   } catch (err) {
     res.status(500).json({ error: err.message })

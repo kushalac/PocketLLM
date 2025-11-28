@@ -1,5 +1,6 @@
 const { v4: uuidv4 } = require("uuid")
 const Document = require("../models/Document")
+const CacheService = require("./CacheService")
 
 class DocumentService {
   async createDocument(userId, { title, content, tags = [], source = "manual" }) {
@@ -17,15 +18,34 @@ class DocumentService {
     })
 
     await doc.save()
+    
+    // Invalidate documents cache
+    CacheService.delete(`documents:${userId}`)
+    
     return doc
   }
 
   async listDocuments(userId) {
-    return Document.find({ user_id: userId }).sort({ created_at: -1 })
+    const cacheKey = `documents:${userId}`
+    const cached = CacheService.get(cacheKey)
+    
+    if (cached) {
+      return cached
+    }
+    
+    const documents = await Document.find({ user_id: userId }).sort({ created_at: -1 })
+    CacheService.set(cacheKey, documents, 60000) // Cache for 60 seconds
+    
+    return documents
   }
 
   async deleteDocument(userId, documentId) {
-    return Document.deleteOne({ _id: documentId, user_id: userId })
+    const result = await Document.deleteOne({ _id: documentId, user_id: userId })
+    
+    // Invalidate documents cache
+    CacheService.delete(`documents:${userId}`)
+    
+    return result
   }
 
   async searchDocuments(userId, query, limit = 3) {

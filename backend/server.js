@@ -4,6 +4,7 @@ require("dotenv").config()
 
 const { initDB } = require("./db/connection")
 const LLMService = require("./services/LLMService")
+const MetricsService = require("./services/MetricsService")
 const authRoutes = require("./routes/auth")
 const chatRoutes = require("./routes/chat")
 const adminRoutes = require("./routes/admin")
@@ -24,6 +25,12 @@ app.use(express.json({
     }
   },
 }))
+
+// Track all API requests for metrics
+app.use('/api', (req, res, next) => {
+  MetricsService.recordRequest()
+  next()
+})
 
 let ollamaHealthCache = { status: false, lastCheck: 0 }
 const CACHE_DURATION = 30000 // 30 seconds

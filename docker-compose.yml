@@ -59,6 +59,7 @@ services:
       - MONGODB_URI=mongodb://root:password@mongodb:27017/pocketllm?authSource=admin
       - OLLAMA_URL=http://ollama:11434/api/generate
       - OLLAMA_MODEL=llama2:7b-chat
+      - OLLAMA_MAX_TOKENS=256
     depends_on:
       - mongodb
       - ollama

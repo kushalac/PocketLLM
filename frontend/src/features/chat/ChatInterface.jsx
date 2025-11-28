@@ -18,11 +18,13 @@ export default function ChatInterface() {
   const [error, setError] = useState("")
   const [showDocs, setShowDocs] = useState(false)
   const [streamController, setStreamController] = useState(null)
+  const [isCreatingSession, setIsCreatingSession] = useState(false)
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const activeSessionRef = useRef(null)
   const streamingSessionRef = useRef(null)
   const messagesCacheRef = useRef({})
+  const isCreatingSessionRef = useRef(false)
 
   const updateMessagesForSession = useCallback((sessionId, updater) => {
     if (!sessionId) return
@@ -52,14 +54,15 @@ export default function ChatInterface() {
   }, [searchParams, sessions])
 
   const fetchMessages = useCallback(
-    async (sessionId) => {
+    async (sessionId, forceRefresh = false) => {
       if (!sessionId) {
         setMessages([])
         return
       }
 
       try {
-        const msgs = await ChatSessionService.getMessages(sessionId)
+        // Load messages (will use cache automatically)
+        const msgs = await ChatSessionService.getMessages(sessionId, forceRefresh)
         const formatted = (msgs || []).map((m) => ({
           id: m._id || m.id || Date.now(),
           role: m.role,
@@ -71,6 +74,7 @@ export default function ChatInterface() {
         updateMessagesForSession(sessionId, formatted)
       } catch (err) {
         setError("Failed to load messages")
+        console.error("Error loading messages:", err)
       }
     },
     [updateMessagesForSession],
@@ -100,9 +104,10 @@ export default function ChatInterface() {
     }
   }
 
-  const loadSessions = async () => {
+  const loadSessions = async (forceRefresh = false) => {
     try {
-      const data = await ChatSessionService.getSessions()
+      // Load sessions (will use cache automatically)
+      const data = await ChatSessionService.getSessions(forceRefresh)
       setSessions(data)
       const requestedSession = searchParams.get("session")
       const isRequestedValid = requestedSession && data.some((s) => s.id === requestedSession)
@@ -127,17 +132,36 @@ export default function ChatInterface() {
       }
     } catch (err) {
       setError("Failed to load sessions")
+      console.error("Error loading sessions:", err)
     }
   }
 
   const handleNewChat = async () => {
+    // Use ref for immediate check to prevent race conditions
+    if (isCreatingSessionRef.current) {
+      console.log("Already creating session, ignoring click")
+      return
+    }
+    
     try {
+      console.log("Starting new session...")
+      isCreatingSessionRef.current = true
+      setIsCreatingSession(true)
+      setError("")
+      
       const sessionId = await ChatSessionService.startSession()
-      setActiveSession(sessionId)
+      console.log("Session created:", sessionId)
+      
       setMessages([])
-      await loadSessions()
+      await loadSessions(true)
+      setActiveSession(sessionId)
     } catch (err) {
+      console.error("Failed to create new chat:", err)
       setError("Failed to create new chat")
+    } finally {
+      console.log("New session creation complete")
+      isCreatingSessionRef.current = false
+      setIsCreatingSession(false)
     }
   }
 
@@ -214,8 +238,8 @@ export default function ChatInterface() {
         setError("Failed to send message")
       }
     } finally {
-      loadSessions()
-      fetchMessages(currentSessionId)
+      loadSessions(true)
+      fetchMessages(currentSessionId, true)
       setIsStreaming(false)
       setStreamController(null)
       streamingSessionRef.current = null
@@ -232,7 +256,7 @@ export default function ChatInterface() {
   const handleRenameSession = async (sessionId, newTitle) => {
     try {
       await ChatSessionService.renameSession(sessionId, newTitle)
-      await loadSessions()
+      await loadSessions(true)
     } catch (err) {
       setError("Failed to rename session")
     }
@@ -241,18 +265,22 @@ export default function ChatInterface() {
   const handleDeleteSession = async (sessionId) => {
     try {
       await ChatSessionService.deleteSession(sessionId)
+      
+      // Clear from local cache
+      delete messagesCacheRef.current[sessionId]
+      
       if (activeSessionId === sessionId) {
         setActiveSession(null)
         setMessages([])
       }
-      await loadSessions()
+      await loadSessions(true)
     } catch (err) {
       setError("Failed to delete session")
     }
   }
 
-  const handleLogout = () => {
-    AuthService.logout()
+  const handleLogout = async () => {
+    await AuthService.logout()
     navigate("/login")
   }
 
@@ -265,6 +293,7 @@ export default function ChatInterface() {
         onNewChat={handleNewChat}
         onRenameSession={handleRenameSession}
         onDeleteSession={handleDeleteSession}
+        isCreatingSession={isCreatingSession}
       />
 
       <div className="flex-1 flex flex-col">
