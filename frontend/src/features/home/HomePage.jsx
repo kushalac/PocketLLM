@@ -25,15 +25,6 @@ export default function HomePage() {
             {isAdmin && <span className="ml-2 text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">Admin</span>}
           </span>
 
-          {isAdmin && (
-            <button
-              onClick={() => navigate("/admin")}
-              className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition"
-            >
-              Admin
-            </button>
-          )}
-
           <button onClick={handleLogout} className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition">
             Logout
           </button>
