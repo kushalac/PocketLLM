@@ -207,7 +207,9 @@ class ChatSessionService {
         return cached
       }
       
-      throw error
+      // Return empty array for new sessions with no messages instead of throwing
+      console.log("Returning empty messages array for new session")
+      return []
     }
   }
 
