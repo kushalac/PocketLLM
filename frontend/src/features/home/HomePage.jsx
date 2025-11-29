@@ -44,7 +44,7 @@ export default function HomePage() {
       <main className="max-w-6xl mx-auto py-12 px-6">
         <div className="text-center mb-12">
           <h2 className="text-4xl font-bold text-gray-800 mb-4">Welcome to PocketLLM</h2>
-          <p className="text-xl text-gray-600">A full-stack chat application with LLM integration</p>
+          <p className="text-xl text-gray-600">A chat application with LLM integration</p>
         </div>
 
         {/* Feature Grid */}
