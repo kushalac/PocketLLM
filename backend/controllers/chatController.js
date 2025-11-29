@@ -3,6 +3,8 @@ const LLMService = require("../services/LLMService")
 const MetricsService = require("../services/MetricsService")
 const LogService = require("../services/LogService")
 const DocumentService = require("../services/DocumentService")
+const UserPreferencesService = require("../services/UserPreferencesService")
+const AdminSettings = require("../models/AdminSettings")
 
 const buildPromptFromHistory = (messages = []) => {
   if (!messages.length) return null
@@ -55,6 +57,12 @@ const sendMessage = async (req, res) => {
     res.setHeader("Cache-Control", "no-cache")
     res.setHeader("Connection", "keep-alive")
 
+    // Fetch admin settings and user preferences to get model settings
+    const adminSettings = await AdminSettings.findOne().lean()
+    const userSettings = await UserPreferencesService.getUserModelSettings(req.user.id, adminSettings)
+    const contextWindowSize = userSettings.contextWindowSize
+    const maxResponseLength = userSettings.maxResponseLength
+
     const startTime = Date.now()
     let fullResponse = ""
     const abortController = new AbortController()
@@ -67,7 +75,7 @@ const sendMessage = async (req, res) => {
     conversationPrompt = buildPromptFromHistory(conversationPrompt) || `User: ${message}\nAssistant:`
 
     try {
-      for await (const chunk of LLMService.streamResponse(conversationPrompt, { signal: abortController.signal })) {
+      for await (const chunk of LLMService.streamResponse(conversationPrompt, { signal: abortController.signal, contextWindowSize, maxResponseLength })) {
         // Only write to the response if it is still writable
         if (!res.writableEnded) {
           res.write(`data: ${JSON.stringify({ content: chunk })}\n\n`)
@@ -79,19 +87,29 @@ const sendMessage = async (req, res) => {
       MetricsService.recordResponseTime(responseTime)
       shouldPersistAssistant = true
     } catch (err) {
+      let errorMessage = null
       if (abortController.signal.aborted) {
         streamCancelled = true
         shouldPersistAssistant = Boolean(fullResponse)
       } else {
         console.error("Streaming error:", err)
+        errorMessage = err.message
         if (!res.writableEnded) {
           try {
-            res.write(`data: ${JSON.stringify({ error: err.message })}\n\n`)
+            res.write(`data: ${JSON.stringify({ error: errorMessage })}\n\n`)
             res.end()
           } catch (writeErr) {
             console.error("Error writing error response (response may already be closed):", writeErr)
           }
         }
+      }
+      
+      // Persist error message to database
+      if (errorMessage) {
+        await ChatService.addMessage(sessionId, req.user.id, "assistant", errorMessage, {
+          status: "error",
+          evidence: [],
+        })
       }
     }
     req.off("close", handleAbort)
@@ -178,6 +196,13 @@ const regenerateResponse = async (req, res) => {
     res.setHeader("Cache-Control", "no-cache")
     res.setHeader("Connection", "keep-alive")
 
+    // Fetch admin settings and user preferences to get model settings
+    const adminSettings = await AdminSettings.findOne().lean()
+    const userSettings = await UserPreferencesService.getUserModelSettings(req.user.id, adminSettings)
+    const responseTimeout = userSettings.responseTimeout * 1000 // Convert seconds to milliseconds
+    const contextWindowSize = userSettings.contextWindowSize
+    const maxResponseLength = userSettings.maxResponseLength
+
     const startTime = Date.now()
     let fullResponse = ""
     const abortController = new AbortController()
@@ -190,7 +215,7 @@ const regenerateResponse = async (req, res) => {
     conversationPrompt = buildPromptFromHistory(conversationPrompt) || `User: ${message}\nAssistant:`
 
     try {
-      for await (const chunk of LLMService.streamResponse(conversationPrompt, { signal: abortController.signal })) {
+      for await (const chunk of LLMService.streamResponse(conversationPrompt, { signal: abortController.signal, timeout: responseTimeout, contextWindowSize, maxResponseLength })) {
         // Only write to the response if it is still writable
         if (!res.writableEnded) {
           res.write(`data: ${JSON.stringify({ content: chunk })}\n\n`)
@@ -314,6 +339,30 @@ const deleteMessage = async (req, res) => {
   }
 }
 
+const updateMessage = async (req, res) => {
+  try {
+    const { sessionId, messageId, content, status } = req.body
+
+    if (!sessionId || !messageId) {
+      return res.status(400).json({ error: "Missing required fields" })
+    }
+
+    const updates = {}
+    if (content !== undefined) {
+      updates.content = content
+    }
+    if (status !== undefined) {
+      updates.status = status
+    }
+
+    await ChatService.updateMessage(sessionId, messageId, req.user.id, updates)
+    res.json({ message: "Message updated" })
+  } catch (err) {
+    console.error("Error updating message:", err.message)
+    res.status(500).json({ error: err.message })
+  }
+}
+
 module.exports = {
   startSession,
   getSessions,
@@ -322,6 +371,7 @@ module.exports = {
   renameSession,
   deleteSession,
   deleteMessage,
+  updateMessage,
   exportSession,
   uploadDocument,
   listDocuments,
