@@ -1,9 +1,9 @@
 const Log = require("../models/Log")
 
 class LogService {
-  async log(level, message) {
+  async log(level, message, metadata = null) {
     try {
-      const entry = new Log({ level, message })
+      const entry = new Log({ level, message, metadata })
       await entry.save()
     } catch (err) {
       // If logging to DB fails, fallback to console to avoid crashing the app
