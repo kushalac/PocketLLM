@@ -297,20 +297,21 @@ export default function ChatInterface() {
     
     const userMessage = allMessages[userMessageIndex]
     const userContent = userMessage.content
+    const assistantMessageId = assistantMessage.id
     
     // Delete old assistant response from DB
     try {
-      await ChatSessionService.deleteMessage(currentSessionId, assistantMessage.id)
+      await ChatSessionService.deleteMessage(currentSessionId, assistantMessageId)
     } catch (err) {
       console.error("Error deleting old response:", err)
     }
     
-    // Remove old response from UI only
+    // Remove old response from UI only (keep user message)
     updateMessagesForSession(currentSessionId, (prev) => 
       prev.slice(0, messageIndex)
     )
     
-    // Re-send without adding user message again (it's already there)
+    // Regenerate using the dedicated regenerate endpoint (doesn't add new user message)
     setIsStreaming(true)
     setError("")
     
@@ -319,7 +320,12 @@ export default function ChatInterface() {
     streamingSessionRef.current = currentSessionId
     
     try {
-      const response = await ChatSessionService.sendMessage(currentSessionId, userContent, abortController.signal)
+      const response = await ChatSessionService.regenerateResponse(
+        currentSessionId, 
+        userContent, 
+        abortController.signal,
+        userMessage.id  // Pass user message ID for cascade deletion
+      )
       
       let assistantResponseText = ""
       const reader = response?.body?.getReader?.()
@@ -393,38 +399,36 @@ export default function ChatInterface() {
     // Only delete user messages
     if (messageToDelete.role !== "user") return
     
-    const indicesToDelete = [messageIndex]
-    
-    // Check if next message is assistant response and mark for deletion
-    if (messageIndex + 1 < allMessages.length && allMessages[messageIndex + 1]?.role === "assistant") {
-      indicesToDelete.push(messageIndex + 1)
-    }
-    
     try {
-      // Delete user message from DB
-      await ChatSessionService.deleteMessage(currentSessionId, messageToDelete.id)
+      console.log("Deleting user message and associated response:", {
+        messageId: messageToDelete.id,
+        messageIndex,
+        sessionId: currentSessionId
+      })
       
-      // Delete associated assistant response if exists
-      if (allMessages[messageIndex + 1]?.role === "assistant") {
-        const assistantResponse = allMessages[messageIndex + 1]
-        try {
-          await ChatSessionService.deleteMessage(currentSessionId, assistantResponse.id)
-        } catch (err) {
-          console.error("Error deleting associated response:", err)
-        }
+      // Check how many messages to remove from UI
+      let indicesToRemove = [messageIndex]
+      if (messageIndex + 1 < allMessages.length && allMessages[messageIndex + 1]?.role === "assistant") {
+        indicesToRemove.push(messageIndex + 1)
       }
       
-      // Remove both from local state
+      // Remove from local state FIRST (immediate UI feedback)
       updateMessagesForSession(currentSessionId, (prev) => 
-        prev.filter((_, idx) => !indicesToDelete.includes(idx))
+        prev.filter((_, idx) => !indicesToRemove.includes(idx))
       )
       
-      // Refresh to ensure DB and UI are in sync
+      // Delete user message from DB - backend will also delete associated assistant response
+      const deleteRes = await ChatSessionService.deleteMessage(currentSessionId, messageToDelete.id)
+      console.log("Message pair deleted successfully:", deleteRes)
+      
+      // Refresh sessions list
       await loadSessions(true)
-      await fetchMessages(currentSessionId, true)
+      setError("") // Clear error on success
     } catch (err) {
       console.error("Failed to delete message:", err)
-      setError("Failed to delete message")
+      setError("Failed to delete message: " + err.message)
+      // Refetch to restore UI if deletion failed
+      await fetchMessages(currentSessionId, true)
     }
   }
 
