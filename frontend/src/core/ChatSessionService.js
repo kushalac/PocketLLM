@@ -101,6 +101,21 @@ class ChatSessionService {
     return res
   }
 
+  async regenerateResponse(sessionId, message, signal, userMessageId) {
+    const token = AuthService.getToken()
+    const res = await fetch(`${API_URL}/chat/regenerate`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ sessionId, message, userMessageId }),
+      signal,
+    })
+
+    return res
+  }
+
   async renameSession(sessionId, title) {
     const res = await apiClient.patch(`/chat/rename/${sessionId}`, { title })
     
@@ -120,16 +135,22 @@ class ChatSessionService {
   }
 
   async deleteMessage(sessionId, messageId) {
-    const res = await apiClient.post(`/chat/message/delete`, { 
-      sessionId, 
-      messageId 
-    })
-    
-    // Clear message cache for this session
-    const cacheKey = `messages:${sessionId}`
-    await IndexedDBCache.clear(cacheKey)
-    
-    return res
+    console.log("ChatSessionService.deleteMessage called with:", { sessionId, messageId })
+    try {
+      const res = await apiClient.post(`/chat/message/delete`, { 
+        sessionId, 
+        messageId 
+      })
+      console.log("Delete message API response:", res)
+      
+      // Clear message cache for this session
+      await IndexedDBCache.clearMessagesForSession(sessionId)
+      
+      return res
+    } catch (err) {
+      console.error("ChatSessionService.deleteMessage error:", err.response?.data || err.message)
+      throw err
+    }
   }
 
   exportSession(sessionId) {

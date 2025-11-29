@@ -209,6 +209,30 @@ class IndexedDBCache {
     }
   }
 
+  async clearMessagesForSession(sessionId) {
+    try {
+      const db = await this.ensureDB()
+      const tx = db.transaction([STORES.MESSAGES], "readwrite")
+      const store = tx.objectStore(STORES.MESSAGES)
+      const index = store.index("sessionId")
+
+      const messageIds = await new Promise((resolve, reject) => {
+        const request = index.getAllKeys(sessionId)
+        request.onsuccess = () => resolve(request.result)
+        request.onerror = () => reject(request.error)
+      })
+
+      for (const messageId of messageIds) {
+        await store.delete(messageId)
+      }
+
+      await tx.complete
+      console.log(`Cleared message cache for session ${sessionId}`)
+    } catch (error) {
+      console.error("Failed to clear messages from IndexedDB:", error)
+    }
+  }
+
   async getMessages(sessionId) {
     try {
       const db = await this.ensureDB()
