@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
+import axios from "axios"
 import AuthService from "../../core/AuthService"
 import ChatSessionService from "../../core/ChatSessionService"
 import ChatHeader from "./ChatHeader"
@@ -96,9 +97,8 @@ export default function ChatInterface() {
     const cached = messagesCacheRef.current[activeSessionId]
     if (cached) {
       setMessages(cached)
-    } else {
-      setMessages([])
     }
+    // Don't clear messages - just load asynchronously, keep cached messages visible
     fetchMessages(activeSessionId)
   }, [activeSessionId, fetchMessages])
 
@@ -147,27 +147,27 @@ export default function ChatInterface() {
   const handleNewChat = async () => {
     // Use ref for immediate check to prevent race conditions
     if (isCreatingSessionRef.current) {
-      console.log("Already creating session, ignoring click")
+      console.log("Already creating session")
       return
     }
     
     try {
-      console.log("Starting new session...")
       isCreatingSessionRef.current = true
       setIsCreatingSession(true)
       setError("")
       
+      console.log("Starting new session")
       const sessionId = await ChatSessionService.startSession()
       console.log("Session created:", sessionId)
       
       setMessages([])
       await loadSessions(true)
       setActiveSession(sessionId)
+      console.log("New session creation complete")
     } catch (err) {
       console.error("Failed to create new chat:", err)
       setError("Failed to create new chat")
     } finally {
-      console.log("New session creation complete")
       isCreatingSessionRef.current = false
       setIsCreatingSession(false)
     }
@@ -212,6 +212,29 @@ export default function ChatInterface() {
 
               try {
                 const parsed = JSON.parse(data)
+                
+                // Check for error in response
+                if (parsed.error) {
+                  assistantMessage = parsed.error
+                  updateMessagesForSession(currentSessionId, (prev) => {
+                    const updated = [...prev]
+                    const last = updated[updated.length - 1]
+                    if (last?.role === "assistant" && last.status === "streaming") {
+                      updated[updated.length - 1] = { ...last, content: assistantMessage, status: "error" }
+                    } else {
+                      updated.push({
+                        role: "assistant",
+                        content: assistantMessage,
+                        id: Date.now(),
+                        status: "error",
+                        evidence: [],
+                      })
+                    }
+                    return updated
+                  })
+                  break
+                }
+                
                 assistantMessage += parsed.content || ""
                 if (streamingSessionRef.current !== currentSessionId) {
                   continue
@@ -247,7 +270,8 @@ export default function ChatInterface() {
       }
     } finally {
       loadSessions(true)
-      fetchMessages(currentSessionId, true)
+      // Force refresh to get latest messages including error messages from DB
+      await fetchMessages(currentSessionId, true)
       setIsStreaming(false)
       setStreamController(null)
       streamingSessionRef.current = null
@@ -259,19 +283,37 @@ export default function ChatInterface() {
       streamController.abort()
     }
     
-    // Keep the partial response and mark as aborted
-    updateMessagesForSession(activeSessionRef.current, (prev) => {
+    const currentSessionId = activeSessionRef.current
+    const allMessages = messagesCacheRef.current[currentSessionId] || messages
+    const lastMsg = allMessages[allMessages.length - 1]
+    
+    // Mark as aborted in React state
+    updateMessagesForSession(currentSessionId, (prev) => {
       const updated = [...prev]
-      const lastMsg = updated[updated.length - 1]
-      if (lastMsg?.role === "assistant" && lastMsg.status === "streaming") {
-        updated[updated.length - 1] = { ...lastMsg, status: "aborted" }
+      const msg = updated[updated.length - 1]
+      if (msg?.role === "assistant" && msg.status === "streaming") {
+        updated[updated.length - 1] = { ...msg, status: "aborted" }
       }
       return updated
     })
     
-    // Refresh to save the partial response to DB
-    await loadSessions(true)
-    await fetchMessages(activeSessionRef.current, true)
+    // Save the partial response to the database
+    if (lastMsg?.id && lastMsg?.role === "assistant" && lastMsg?.status === "streaming") {
+      try {
+        await axios.post(
+          "/api/chat/message/update",
+          {
+            sessionId: currentSessionId,
+            messageId: lastMsg.id,
+            content: lastMsg.content,
+            status: "aborted",
+          },
+          { headers: { Authorization: `Bearer ${localStorage.getItem("authToken")}` } }
+        )
+      } catch (err) {
+        console.error("Failed to save partial response:", err.message)
+      }
+    }
     
     setIsStreaming(false)
     setStreamController(null)
@@ -346,6 +388,29 @@ export default function ChatInterface() {
               
               try {
                 const parsed = JSON.parse(data)
+                
+                // Check for error in response
+                if (parsed.error) {
+                  assistantResponseText = parsed.error
+                  updateMessagesForSession(currentSessionId, (prev) => {
+                    const updated = [...prev]
+                    const last = updated[updated.length - 1]
+                    if (last?.role === "assistant" && last.status === "streaming") {
+                      updated[updated.length - 1] = { ...last, content: assistantResponseText, status: "error" }
+                    } else {
+                      updated.push({
+                        role: "assistant",
+                        content: assistantResponseText,
+                        id: Date.now(),
+                        status: "error",
+                        evidence: [],
+                      })
+                    }
+                    return updated
+                  })
+                  break
+                }
+                
                 assistantResponseText += parsed.content || ""
                 if (streamingSessionRef.current !== currentSessionId) continue
                 
@@ -380,6 +445,7 @@ export default function ChatInterface() {
       }
     } finally {
       await loadSessions(true)
+      // Force refresh to get latest messages including error messages from DB
       await fetchMessages(currentSessionId, true)
       setIsStreaming(false)
       setStreamController(null)
@@ -400,12 +466,7 @@ export default function ChatInterface() {
     if (messageToDelete.role !== "user") return
     
     try {
-      console.log("Deleting user message and associated response:", {
-        messageId: messageToDelete.id,
-        messageIndex,
-        sessionId: currentSessionId
-      })
-      
+      console.log("Deleting user message:", messageToDelete.id, "and associated assistant response if exists")
       // Check how many messages to remove from UI
       let indicesToRemove = [messageIndex]
       if (messageIndex + 1 < allMessages.length && allMessages[messageIndex + 1]?.role === "assistant") {
@@ -419,7 +480,7 @@ export default function ChatInterface() {
       
       // Delete user message from DB - backend will also delete associated assistant response
       const deleteRes = await ChatSessionService.deleteMessage(currentSessionId, messageToDelete.id)
-      console.log("Message pair deleted successfully:", deleteRes)
+      console.log("Message pair deleted successfully")
       
       // Refresh sessions list
       await loadSessions(true)
@@ -487,7 +548,7 @@ export default function ChatInterface() {
       <div className="flex-1 flex flex-col">
         <ChatHeader onLogout={handleLogout} onOpenDocs={() => setShowDocs(true)} onToggleSidebar={handleToggleSidebar} />
 
-        <div className="flex-1 overflow-hidden">
+        <div className="flex-1 overflow-hidden flex flex-col">
           {activeSessionId ? (
             <div className="h-full flex flex-col">
               <MessageList messages={messages} loading={isStreaming} onRegenerate={handleRegenerateResponse} onDeleteMessage={handleDeleteMessage} />
