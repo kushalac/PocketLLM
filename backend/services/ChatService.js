@@ -204,7 +204,7 @@ class ChatService {
     }
   }
 
-  // NEW METHOD: Clear all messages from a session (useful for testing)
+  // Clear all messages from a session
   async clearSessionMessages(sessionId, userId) {
     const session = await this.getSession(sessionId, userId)
     if (!session) throw new Error("Session not found")
