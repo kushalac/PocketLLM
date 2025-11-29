@@ -236,14 +236,13 @@ class ChatService {
 
   async deleteMessage(sessionId, messageId, userId) {
     // Verify the message belongs to this session and user
-    console.log("deleteMessage called with:", { sessionId, messageId, userId, userIdType: typeof userId })
-    
     const message = await Message.findOne({ 
       _id: messageId, 
       session_id: sessionId, 
       user_id: userId 
     })
     
+    console.log("deleteMessage called with:", { sessionId, messageId, userId })
     console.log("Found message:", message)
     
     if (!message) {
@@ -307,6 +306,49 @@ class ChatService {
     CacheService.delete(`messages:${sessionId}`)
 
     return true
+  }
+
+  async updateMessage(sessionId, messageId, userId, updates = {}) {
+    // Verify the message belongs to this session and user
+    const message = await Message.findOne({ 
+      _id: messageId, 
+      session_id: sessionId, 
+      user_id: userId 
+    })
+    
+    if (!message) {
+      throw new Error("Message not found or not owned by this user")
+    }
+
+    // Update allowed fields
+    if ("content" in updates) {
+      message.content = updates.content
+    }
+    if ("status" in updates) {
+      message.status = updates.status
+    }
+    if ("evidence" in updates) {
+      message.evidence = updates.evidence
+    }
+    if ("meta" in updates) {
+      message.meta = updates.meta
+    }
+
+    await message.save()
+
+    // Update session timestamp
+    const session = await ChatSession.findOne({ _id: sessionId, user_id: userId })
+    if (session) {
+      session.updated_at = new Date()
+      await session.save()
+    }
+
+    // Invalidate cache
+    CacheService.delete(`session:${sessionId}:${userId}`)
+    CacheService.delete(`sessions:${userId}`)
+    CacheService.delete(`messages:${sessionId}`)
+
+    return messageId
   }
 
   async deleteMessagesAfter(sessionId, messageId, userId) {
