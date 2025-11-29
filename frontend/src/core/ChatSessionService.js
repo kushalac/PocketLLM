@@ -119,6 +119,19 @@ class ChatSessionService {
     return res
   }
 
+  async deleteMessage(sessionId, messageId) {
+    const res = await apiClient.post(`/chat/message/delete`, { 
+      sessionId, 
+      messageId 
+    })
+    
+    // Clear message cache for this session
+    const cacheKey = `messages:${sessionId}`
+    await IndexedDBCache.clear(cacheKey)
+    
+    return res
+  }
+
   exportSession(sessionId) {
     return apiClient.get(`/chat/export/${sessionId}`)
   }

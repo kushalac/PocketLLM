@@ -6,6 +6,7 @@ const {
   sendMessage,
   renameSession,
   deleteSession,
+  deleteMessage,
   exportSession,
   uploadDocument,
   listDocuments,
@@ -19,6 +20,7 @@ router.get("/sessions", authMiddleware, getSessions)
 router.post("/send", authMiddleware, sendMessage)
 router.patch("/rename/:sessionId", authMiddleware, renameSession)
 router.delete("/session/:sessionId", authMiddleware, deleteSession)
+router.post("/message/delete", authMiddleware, deleteMessage)
 router.get("/export/:sessionId", authMiddleware, exportSession)
 router.post("/documents", authMiddleware, uploadDocument)
 router.get("/documents", authMiddleware, listDocuments)

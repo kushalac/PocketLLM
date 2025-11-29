@@ -22,11 +22,21 @@ export default function ChatHeader({ onLogout, onOpenDocs, onToggleSidebar }) {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
           </svg>
         </button>
-        <h1 className="text-xl font-bold text-gray-800">PocketLLM</h1>
-        <span className="text-xs font-medium text-emerald-700 bg-emerald-50 px-2 py-1 rounded-full border border-emerald-200 flex items-center gap-1">
-          <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></span>
-          llama2:7b
-        </span>
+        <button
+          onClick={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            navigate("/")
+          }}
+          className="hover:opacity-75 transition flex items-center gap-2 group cursor-pointer"
+          title="Go to home"
+        >
+          <h1 className="text-xl font-bold text-gray-800 group-hover:text-blue-600">PocketLLM</h1>
+          <span className="text-xs font-medium text-emerald-700 bg-emerald-50 px-2 py-1 rounded-full border border-emerald-200 flex items-center gap-1">
+            <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></span>
+            llama2:7b
+          </span>
+        </button>
       </div>
 
       <div className="flex items-center gap-2">

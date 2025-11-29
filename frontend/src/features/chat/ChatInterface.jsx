@@ -19,6 +19,14 @@ export default function ChatInterface() {
   const [showDocs, setShowDocs] = useState(false)
   const [streamController, setStreamController] = useState(null)
   const [isCreatingSession, setIsCreatingSession] = useState(false)
+  const [sidebarOpen, setSidebarOpen] = useState(() => {
+    // Restore from localStorage or default to true
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('chatSidebarOpen')
+      return saved ? JSON.parse(saved) : true
+    }
+    return true
+  })
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const activeSessionRef = useRef(null)
@@ -246,11 +254,178 @@ export default function ChatInterface() {
     }
   }
 
-  const handleStopStreaming = () => {
+  const handleStopStreaming = async () => {
     if (streamController) {
       streamController.abort()
     }
+    
+    // Keep the partial response and mark as aborted
+    updateMessagesForSession(activeSessionRef.current, (prev) => {
+      const updated = [...prev]
+      const lastMsg = updated[updated.length - 1]
+      if (lastMsg?.role === "assistant" && lastMsg.status === "streaming") {
+        updated[updated.length - 1] = { ...lastMsg, status: "aborted" }
+      }
+      return updated
+    })
+    
+    // Refresh to save the partial response to DB
+    await loadSessions(true)
+    await fetchMessages(activeSessionRef.current, true)
+    
+    setIsStreaming(false)
+    setStreamController(null)
     streamingSessionRef.current = null
+  }
+
+  const handleRegenerateResponse = async (messageIndex) => {
+    if (isStreaming || !activeSessionRef.current) return
+    
+    const currentSessionId = activeSessionRef.current
+    const allMessages = messagesCacheRef.current[currentSessionId] || messages
+    const assistantMessage = allMessages[messageIndex]
+    
+    if (!assistantMessage || assistantMessage.role !== "assistant") return
+    
+    // Find the user message that triggered this response
+    let userMessageIndex = messageIndex - 1
+    while (userMessageIndex >= 0 && allMessages[userMessageIndex]?.role !== "user") {
+      userMessageIndex--
+    }
+    
+    if (userMessageIndex < 0) return
+    
+    const userMessage = allMessages[userMessageIndex]
+    const userContent = userMessage.content
+    
+    // Delete old assistant response from DB
+    try {
+      await ChatSessionService.deleteMessage(currentSessionId, assistantMessage.id)
+    } catch (err) {
+      console.error("Error deleting old response:", err)
+    }
+    
+    // Remove old response from UI only
+    updateMessagesForSession(currentSessionId, (prev) => 
+      prev.slice(0, messageIndex)
+    )
+    
+    // Re-send without adding user message again (it's already there)
+    setIsStreaming(true)
+    setError("")
+    
+    const abortController = new AbortController()
+    setStreamController(abortController)
+    streamingSessionRef.current = currentSessionId
+    
+    try {
+      const response = await ChatSessionService.sendMessage(currentSessionId, userContent, abortController.signal)
+      
+      let assistantResponseText = ""
+      const reader = response?.body?.getReader?.()
+      
+      if (reader) {
+        const decoder = new TextDecoder()
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          
+          const chunk = decoder.decode(value)
+          const lines = chunk.split("\n")
+          
+          for (const line of lines) {
+            if (line.startsWith("data: ")) {
+              const data = line.slice(6)
+              if (data === "[DONE]") continue
+              
+              try {
+                const parsed = JSON.parse(data)
+                assistantResponseText += parsed.content || ""
+                if (streamingSessionRef.current !== currentSessionId) continue
+                
+                updateMessagesForSession(currentSessionId, (prev) => {
+                  const updated = [...prev]
+                  const last = updated[updated.length - 1]
+                  if (last?.role === "assistant" && last.status === "streaming") {
+                    updated[updated.length - 1] = { ...last, content: assistantResponseText }
+                  } else {
+                    updated.push({
+                      role: "assistant",
+                      content: assistantResponseText,
+                      id: Date.now(),
+                      status: "streaming",
+                      evidence: [],
+                    })
+                  }
+                  return updated
+                })
+              } catch (e) {
+                // Ignore parse errors
+              }
+            }
+          }
+        }
+      }
+    } catch (err) {
+      if (err.name === "AbortError") {
+        setError("")
+      } else {
+        setError("Failed to regenerate response")
+      }
+    } finally {
+      await loadSessions(true)
+      await fetchMessages(currentSessionId, true)
+      setIsStreaming(false)
+      setStreamController(null)
+      streamingSessionRef.current = null
+    }
+  }
+
+  const handleDeleteMessage = async (messageIndex) => {
+    if (!activeSessionRef.current) return
+    
+    const currentSessionId = activeSessionRef.current
+    const allMessages = messagesCacheRef.current[currentSessionId] || messages
+    const messageToDelete = allMessages[messageIndex]
+    
+    if (!messageToDelete?.id) return
+    
+    // Only delete user messages
+    if (messageToDelete.role !== "user") return
+    
+    const indicesToDelete = [messageIndex]
+    
+    // Check if next message is assistant response and mark for deletion
+    if (messageIndex + 1 < allMessages.length && allMessages[messageIndex + 1]?.role === "assistant") {
+      indicesToDelete.push(messageIndex + 1)
+    }
+    
+    try {
+      // Delete user message from DB
+      await ChatSessionService.deleteMessage(currentSessionId, messageToDelete.id)
+      
+      // Delete associated assistant response if exists
+      if (allMessages[messageIndex + 1]?.role === "assistant") {
+        const assistantResponse = allMessages[messageIndex + 1]
+        try {
+          await ChatSessionService.deleteMessage(currentSessionId, assistantResponse.id)
+        } catch (err) {
+          console.error("Error deleting associated response:", err)
+        }
+      }
+      
+      // Remove both from local state
+      updateMessagesForSession(currentSessionId, (prev) => 
+        prev.filter((_, idx) => !indicesToDelete.includes(idx))
+      )
+      
+      // Refresh to ensure DB and UI are in sync
+      await loadSessions(true)
+      await fetchMessages(currentSessionId, true)
+    } catch (err) {
+      console.error("Failed to delete message:", err)
+      setError("Failed to delete message")
+    }
   }
 
   const handleRenameSession = async (sessionId, newTitle) => {
@@ -284,6 +459,14 @@ export default function ChatInterface() {
     navigate("/login")
   }
 
+  const handleToggleSidebar = () => {
+    setSidebarOpen(prev => {
+      const newState = !prev
+      localStorage.setItem('chatSidebarOpen', JSON.stringify(newState))
+      return newState
+    })
+  }
+
   return (
     <div className="flex h-screen bg-gray-50">
       <ChatSidebar
@@ -294,15 +477,16 @@ export default function ChatInterface() {
         onRenameSession={handleRenameSession}
         onDeleteSession={handleDeleteSession}
         isCreatingSession={isCreatingSession}
+        isOpen={sidebarOpen}
       />
 
       <div className="flex-1 flex flex-col">
-        <ChatHeader onLogout={handleLogout} onOpenDocs={() => setShowDocs(true)} />
+        <ChatHeader onLogout={handleLogout} onOpenDocs={() => setShowDocs(true)} onToggleSidebar={handleToggleSidebar} />
 
         <div className="flex-1 overflow-hidden">
           {activeSessionId ? (
             <div className="h-full flex flex-col">
-              <MessageList messages={messages} loading={isStreaming} />
+              <MessageList messages={messages} loading={isStreaming} onRegenerate={handleRegenerateResponse} onDeleteMessage={handleDeleteMessage} />
               <PromptInput onSubmit={handleSendMessage} disabled={isStreaming} isStreaming={isStreaming} onStop={handleStopStreaming} />
             </div>
           ) : (

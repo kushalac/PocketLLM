@@ -194,12 +194,28 @@ const deleteDocument = async (req, res) => {
   }
 }
 
+const deleteMessage = async (req, res) => {
+  try {
+    const { sessionId, messageId } = req.body
+
+    if (!sessionId || !messageId) {
+      return res.status(400).json({ error: "Missing required fields" })
+    }
+
+    await ChatService.deleteMessage(sessionId, messageId, req.user.id)
+    res.json({ message: "Message deleted" })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+}
+
 module.exports = {
   startSession,
   getSessions,
   sendMessage,
   renameSession,
   deleteSession,
+  deleteMessage,
   exportSession,
   uploadDocument,
   listDocuments,

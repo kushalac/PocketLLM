@@ -18,21 +18,53 @@ const formatRelativeTime = (timestamp) => {
   return date.toLocaleDateString()
 }
 
-export default function MessageList({ messages, loading }) {
+export default function MessageList({ messages, loading, onRegenerate, onDeleteMessage }) {
   const endRef = useRef(null)
+  const containerRef = useRef(null)
   const [annotations, setAnnotations] = useState({})
   const [collapsedEvidence, setCollapsedEvidence] = useState({})
+  const [shouldAutoScroll, setShouldAutoScroll] = useState(true)
 
+  // Hide loading indicator if there's an assistant message being generated
+  const hasAssistantMessage = messages.some((msg) => msg.role === "assistant" && msg.content)
+  const showLoading = loading && !hasAssistantMessage
+
+  // Only auto-scroll if user is near bottom or when loading ends
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [messages])
+    const container = containerRef.current
+    if (!container) return
+
+    // Check if user is near the bottom (within 100px)
+    const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100
+
+    // Auto-scroll if:
+    // 1. User was already near bottom, OR
+    // 2. Loading just started/ended
+    if (isNearBottom || !loading) {
+      endRef.current?.scrollIntoView({ behavior: "smooth" })
+    }
+  }, [messages, loading])
+
+  // Track user scroll to disable auto-scroll when they scroll up
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+
+    const handleScroll = () => {
+      const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100
+      setShouldAutoScroll(isNearBottom)
+    }
+
+    container.addEventListener("scroll", handleScroll)
+    return () => container.removeEventListener("scroll", handleScroll)
+  }, [])
 
   const toggleEvidence = (messageId) => {
     setCollapsedEvidence((prev) => ({ ...prev, [messageId]: !prev[messageId] }))
   }
 
   return (
-    <div className="flex-1 overflow-y-auto p-6 space-y-4">
+    <div ref={containerRef} className="flex-1 overflow-y-auto p-6 space-y-4">
       {messages.length === 0 ? (
         <div className="h-full flex flex-col items-center justify-center text-gray-400">
           <svg className="w-16 h-16 mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -60,6 +92,34 @@ export default function MessageList({ messages, loading }) {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                     </svg>
                     <span>Response stopped</span>
+                  </div>
+                )}
+
+                {message.role === "user" && message.content && (
+                  <div className="flex items-center gap-2 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      onClick={() => onDeleteMessage?.(idx)}
+                      className="p-1.5 hover:bg-red-100 rounded-md text-gray-400 hover:text-red-600 transition"
+                      title="Delete message and response"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
+                    </button>
+                  </div>
+                )}
+
+                {message.role === "assistant" && message.content && (
+                  <div className="flex items-center gap-2 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      onClick={() => onRegenerate?.(idx)}
+                      className="p-1.5 hover:bg-gray-100 rounded-md text-gray-400 hover:text-gray-600 transition"
+                      title="Regenerate response"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                    </button>
                   </div>
                 )}
 
@@ -156,23 +216,12 @@ export default function MessageList({ messages, loading }) {
             </div>
           ))}
 
-          {loading && (
+          {showLoading && (
             <div className="flex justify-start">
-              <div className="bg-white border border-gray-200 text-gray-600 px-4 py-3 rounded-2xl rounded-bl-md shadow-sm">
-                <div className="flex items-center gap-2">
-                  <div className="flex gap-1">
-                    <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce"></div>
-                    <div
-                      className="w-2 h-2 bg-blue-500 rounded-full animate-bounce"
-                      style={{ animationDelay: "0.15s" }}
-                    ></div>
-                    <div
-                      className="w-2 h-2 bg-blue-500 rounded-full animate-bounce"
-                      style={{ animationDelay: "0.3s" }}
-                    ></div>
-                  </div>
-                  <span className="text-xs text-gray-400 ml-1">Thinking...</span>
-                </div>
+              <div className="flex items-center gap-1.5">
+                <div className="w-2 h-2 bg-slate-600 rounded-full animate-pulse"></div>
+                <div className="w-2 h-2 bg-slate-600 rounded-full animate-pulse" style={{ animationDelay: "0.2s" }}></div>
+                <div className="w-2 h-2 bg-slate-600 rounded-full animate-pulse" style={{ animationDelay: "0.4s" }}></div>
               </div>
             </div>
           )}

@@ -3,6 +3,7 @@ import { useEffect } from "react"
 import { PrivateRoute, AdminRoute } from "./core/AuthGuard"
 import Login from "./features/auth/Login"
 import Register from "./features/auth/Register"
+import HomePage from "./features/home/HomePage"
 import ChatInterface from "./features/chat/ChatInterface"
 import AdminDashboard from "./features/admin/AdminDashboard"
 import HistoryPage from "./features/history/HistoryPage"
@@ -23,6 +24,15 @@ function App() {
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
+
+        <Route
+          path="/"
+          element={
+            <PrivateRoute>
+              <HomePage />
+            </PrivateRoute>
+          }
+        />
 
         <Route
           path="/chat"
@@ -52,8 +62,6 @@ function App() {
             </PrivateRoute>
           }
         />
-
-        <Route path="/" element={<Navigate to="/chat" />} />
       </Routes>
     </BrowserRouter>
   )

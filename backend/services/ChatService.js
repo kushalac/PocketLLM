@@ -233,6 +233,37 @@ class ChatService {
       isIsolated: messages.every(msg => msg.session_id === sessionId)
     }
   }
+
+  async deleteMessage(sessionId, messageId, userId) {
+    // Verify the message belongs to this session and user
+    const message = await Message.findOne({ 
+      _id: messageId, 
+      session_id: sessionId, 
+      user_id: userId 
+    })
+    
+    if (!message) {
+      throw new Error("Message not found")
+    }
+
+    // Delete the message
+    await Message.deleteOne({ _id: messageId })
+
+    // Update session message count and timestamp
+    const session = await ChatSession.findOne({ _id: sessionId, user_id: userId })
+    if (session) {
+      session.message_count = Math.max(0, (session.message_count || 1) - 1)
+      session.updated_at = new Date()
+      await session.save()
+    }
+
+    // Invalidate cache
+    CacheService.delete(`session:${sessionId}:${userId}`)
+    CacheService.delete(`sessions:${userId}`)
+    CacheService.delete(`messages:${sessionId}`)
+
+    return true
+  }
 }
 
 module.exports = new ChatService()
