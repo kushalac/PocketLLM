@@ -236,25 +236,69 @@ class ChatService {
 
   async deleteMessage(sessionId, messageId, userId) {
     // Verify the message belongs to this session and user
+    console.log("deleteMessage called with:", { sessionId, messageId, userId, userIdType: typeof userId })
+    
     const message = await Message.findOne({ 
       _id: messageId, 
       session_id: sessionId, 
       user_id: userId 
     })
     
+    console.log("Found message:", message)
+    
     if (!message) {
-      throw new Error("Message not found")
+      throw new Error("Message not found or not owned by this user")
     }
 
-    // Delete the message
+    let deletedCount = 1
+    let assistantMessageId = null
+
+    // If this is a user message, find and delete the next assistant response BEFORE deleting the user message
+    if (message.role === "user") {
+      // Find all messages in this session in order
+      const allMessages = await Message.find(
+        { session_id: sessionId, user_id: userId },
+        null,
+        { sort: { created_at: 1 } }
+      )
+      
+      const messageIndex = allMessages.findIndex(m => m._id === messageId)
+      
+      // Check if next message is assistant response
+      if (messageIndex !== -1 && messageIndex + 1 < allMessages.length) {
+        const nextMessage = allMessages[messageIndex + 1]
+        if (nextMessage.role === "assistant") {
+          assistantMessageId = nextMessage._id
+          console.log("Will also delete associated assistant response:", assistantMessageId)
+        }
+      }
+    }
+
+    // Delete the user message
     await Message.deleteOne({ _id: messageId })
+    console.log("Deleted user/assistant message:", messageId)
+    
+    // Delete the associated assistant response if found
+    if (assistantMessageId) {
+      await Message.deleteOne({ _id: assistantMessageId })
+      console.log("Deleted associated assistant response:", assistantMessageId)
+      deletedCount = 2
+    }
 
     // Update session message count and timestamp
     const session = await ChatSession.findOne({ _id: sessionId, user_id: userId })
     if (session) {
-      session.message_count = Math.max(0, (session.message_count || 1) - 1)
+      session.message_count = Math.max(0, (session.message_count || 0) - deletedCount)
       session.updated_at = new Date()
-      await session.save()
+      
+      // If session has no messages left, delete the entire session
+      if (session.message_count <= 0) {
+        console.log("Session is now empty, deleting entire session:", sessionId)
+        await ChatSession.deleteOne({ _id: sessionId })
+        await Message.deleteMany({ session_id: sessionId })
+      } else {
+        await session.save()
+      }
     }
 
     // Invalidate cache
@@ -263,6 +307,50 @@ class ChatService {
     CacheService.delete(`messages:${sessionId}`)
 
     return true
+  }
+
+  async deleteMessagesAfter(sessionId, messageId, userId) {
+    // Get all messages in chronological order
+    const allMessages = await Message.find(
+      { session_id: sessionId, user_id: userId },
+      null,
+      { sort: { created_at: 1 } }
+    )
+    
+    const messageIndex = allMessages.findIndex(m => m._id === messageId)
+    if (messageIndex === -1) {
+      throw new Error("Message not found")
+    }
+    
+    // Get all messages after this one
+    const messagesToDelete = allMessages.slice(messageIndex + 1)
+    
+    if (messagesToDelete.length === 0) {
+      console.log(`No messages after ${messageId} to delete`)
+      return 0
+    }
+    
+    // Delete all messages after the given message
+    const deleteResult = await Message.deleteMany({
+      _id: { $in: messagesToDelete.map(m => m._id) }
+    })
+    
+    console.log(`Deleted ${deleteResult.deletedCount} messages after message ${messageId}`)
+    
+    // Update session message count
+    const session = await ChatSession.findOne({ _id: sessionId, user_id: userId })
+    if (session) {
+      session.message_count = Math.max(0, (session.message_count || 0) - deleteResult.deletedCount)
+      session.updated_at = new Date()
+      await session.save()
+    }
+    
+    // Invalidate cache
+    CacheService.delete(`session:${sessionId}:${userId}`)
+    CacheService.delete(`sessions:${userId}`)
+    CacheService.delete(`messages:${sessionId}`)
+    
+    return deleteResult.deletedCount
   }
 }
 
