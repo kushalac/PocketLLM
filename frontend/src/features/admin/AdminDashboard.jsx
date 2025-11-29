@@ -8,6 +8,7 @@ import ChatSessionService from "../../core/ChatSessionService"
 import MetricsChart from "./MetricsChart"
 import CacheStats from "./CacheStats"
 import LogsView from "./LogsView"
+import ModelSettings from "./ModelSettings"
 
 export default function AdminDashboard() {
   const [metrics, setMetrics] = useState(null)
@@ -172,6 +173,8 @@ export default function AdminDashboard() {
         </div>
 
         <LogsView logs={logs} onClear={handleClearLogs} />
+
+        <ModelSettings onSettingsUpdated={loadAdminData} />
       </div>
     </div>
   )
