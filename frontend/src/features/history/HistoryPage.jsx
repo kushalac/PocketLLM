@@ -105,10 +105,11 @@ export default function HistoryPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
 
-  const loadSessions = async () => {
+  const loadSessions = async (forceRefresh = false) => {
     try {
       setLoading(true)
-      const data = await ChatSessionService.getSessions()
+      // Load from cache first for fast display
+      const data = await ChatSessionService.getSessions(forceRefresh)
       setSessions(data)
     } catch (err) {
       console.error(err)
@@ -119,7 +120,8 @@ export default function HistoryPage() {
   }
 
   useEffect(() => {
-    loadSessions()
+    // Load from cache immediately, then refresh in background
+    loadSessions(false)
   }, [])
 
   const filteredSessions = useMemo(() => {
@@ -152,7 +154,7 @@ export default function HistoryPage() {
     }
     try {
       await ChatSessionService.deleteSession(session.id)
-      await loadSessions()
+      await loadSessions(true)
     } catch (err) {
       console.error(err)
       setError("Failed to delete chat")

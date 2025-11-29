@@ -1,6 +1,7 @@
 const { v4: uuidv4 } = require("uuid")
 const ChatSession = require("../models/ChatSession")
 const Message = require("../models/Message")
+const CacheService = require("./CacheService")
 
 const DEFAULT_TITLE = "New Chat"
 
@@ -32,11 +33,33 @@ class ChatService {
   }
 
   async getSessions(userId) {
-    return await ChatSession.find({ user_id: userId }).sort({ updated_at: -1 })
+    const cacheKey = `sessions:${userId}`
+    const cached = CacheService.get(cacheKey)
+    
+    if (cached) {
+      return cached
+    }
+    
+    const sessions = await ChatSession.find({ user_id: userId }).sort({ updated_at: -1 })
+    CacheService.set(cacheKey, sessions, 30000) // Cache for 30 seconds
+    
+    return sessions
   }
 
   async getSession(sessionId, userId) {
-    return await ChatSession.findOne({ _id: sessionId, user_id: userId })
+    const cacheKey = `session:${sessionId}:${userId}`
+    const cached = CacheService.get(cacheKey)
+    
+    if (cached) {
+      return cached
+    }
+    
+    const session = await ChatSession.findOne({ _id: sessionId, user_id: userId })
+    if (session) {
+      CacheService.set(cacheKey, session, 60000) // Cache for 60 seconds
+    }
+    
+    return session
   }
 
   async renameSession(sessionId, userId, title) {
@@ -48,6 +71,11 @@ class ChatService {
     session.updated_at = new Date()
     await session.save()
 
+    // Invalidate cache
+    CacheService.delete(`session:${sessionId}:${userId}`)
+    CacheService.delete(`sessions:${userId}`)
+    CacheService.delete(`messages:${sessionId}`)
+
     return { id: sessionId, title }
   }
 
@@ -57,6 +85,11 @@ class ChatService {
 
     await Message.deleteMany({ session_id: sessionId })
     await ChatSession.deleteOne({ _id: sessionId })
+
+    // Invalidate cache
+    CacheService.delete(`session:${sessionId}:${userId}`)
+    CacheService.delete(`sessions:${userId}`)
+    CacheService.delete(`messages:${sessionId}`)
 
     return true
   }
@@ -96,6 +129,11 @@ class ChatService {
 
     await session.save()
 
+    // Invalidate cache since session and messages changed
+    CacheService.delete(`session:${sessionId}:${userId}`)
+    CacheService.delete(`sessions:${userId}`)
+    CacheService.delete(`messages:${sessionId}`)
+
     return messageId
   }
 
@@ -105,6 +143,8 @@ class ChatService {
       session_id: sessionId,
       user_id: userId,
     }).sort({ created_at: 1 })
+
+    CacheService.set(cacheKey, messages, 45000) // Cache for 45 seconds
 
     return messages
   }

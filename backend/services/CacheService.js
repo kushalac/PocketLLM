@@ -2,14 +2,22 @@ class LRUCache {
   constructor(maxSize = 100) {
     this.maxSize = maxSize
     this.cache = new Map()
+    
+    // Clean up expired entries every 60 seconds
+    setInterval(() => this.cleanupExpired(), 60000)
   }
 
-  set(key, value) {
+  set(key, value, ttl = null) {
     if (this.cache.has(key)) {
       this.cache.delete(key)
     }
 
-    this.cache.set(key, value)
+    const entry = {
+      value,
+      expiresAt: ttl ? Date.now() + ttl : null,
+    }
+
+    this.cache.set(key, entry)
 
     if (this.cache.size > this.maxSize) {
       const firstKey = this.cache.keys().next().value
@@ -22,14 +30,38 @@ class LRUCache {
       return null
     }
 
-    const value = this.cache.get(key)
-    this.cache.delete(key)
-    this.cache.set(key, value)
+    const entry = this.cache.get(key)
+    
+    // Check if expired
+    if (entry.expiresAt && Date.now() > entry.expiresAt) {
+      this.cache.delete(key)
+      return null
+    }
 
-    return value
+    // Move to end (LRU)
+    this.cache.delete(key)
+    this.cache.set(key, entry)
+
+    return entry.value
+  }
+
+  delete(key) {
+    this.cache.delete(key)
+  }
+
+  cleanupExpired() {
+    const now = Date.now()
+    for (const [key, entry] of this.cache.entries()) {
+      if (entry.expiresAt && now > entry.expiresAt) {
+        this.cache.delete(key)
+      }
+    }
   }
 
   stats() {
+    // Clean up expired before reporting stats
+    this.cleanupExpired()
+    
     return {
       size: this.cache.size,
       maxSize: this.maxSize,

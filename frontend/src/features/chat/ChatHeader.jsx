@@ -6,6 +6,9 @@ import AuthService from "../../core/AuthService"
 export default function ChatHeader({ onLogout, onOpenDocs }) {
   const navigate = useNavigate()
   const user = AuthService.getUser()
+  
+  // Check if user is actually an admin
+  const isAdmin = user?.is_admin === true
 
   return (
     <header className="bg-white border-b border-gray-200 px-6 py-3 flex justify-between items-center">

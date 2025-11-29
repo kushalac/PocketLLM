@@ -10,6 +10,7 @@ export default function ChatSidebar({
   onNewChat,
   onRenameSession,
   onDeleteSession,
+  isCreatingSession = false,
 }) {
   const [renamingId, setRenamingId] = useState(null)
   const [newTitle, setNewTitle] = useState("")
