@@ -81,10 +81,21 @@ export default function MessageList({ messages, loading, onRegenerate, onDeleteM
                 className={`max-w-lg px-4 py-2 rounded-2xl shadow-sm ${
                   message.role === "user"
                     ? "bg-blue-600 text-white rounded-br-md"
+                    : message.status === "error"
+                    ? "bg-red-50 border border-red-200 text-red-700 rounded-bl-md"
                     : "bg-white border border-gray-200 text-gray-800 rounded-bl-md"
                 }`}
               >
                 <p className="text-sm break-words whitespace-pre-line leading-relaxed">{message.content}</p>
+
+                {message.status === "error" && (
+                  <div className="flex items-center gap-1.5 mt-2 text-xs text-red-600">
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                    <span>Request failed</span>
+                  </div>
+                )}
 
                 {message.status === "aborted" && (
                   <div className="flex items-center gap-1.5 mt-2 text-xs text-amber-600">
@@ -112,12 +123,16 @@ export default function MessageList({ messages, loading, onRegenerate, onDeleteM
                   ) : null
                 )}
 
-                {message.role === "assistant" && message.content && message.status !== "streaming" && (
+                {message.role === "assistant" && message.content && (message.status === "error" || message.status === "aborted" || message.status !== "streaming") && (
                   <div className="flex items-center gap-2 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button
                       onClick={() => onRegenerate?.(idx)}
-                      className="p-1.5 hover:bg-blue-100 rounded-md text-gray-400 hover:text-blue-600 transition"
-                      title="Regenerate response"
+                      className={`p-1.5 rounded-md transition ${
+                        message.status === "error"
+                          ? "hover:bg-red-100 text-gray-400 hover:text-red-600"
+                          : "hover:bg-blue-100 text-gray-400 hover:text-blue-600"
+                      }`}
+                      title={message.status === "error" ? "Retry with updated settings" : "Regenerate response"}
                     >
                       <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
