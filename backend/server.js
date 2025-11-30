@@ -5,9 +5,11 @@ require("dotenv").config()
 const { initDB } = require("./db/connection")
 const LLMService = require("./services/LLMService")
 const MetricsService = require("./services/MetricsService")
+const AdminSettings = require("./models/AdminSettings")
 const authRoutes = require("./routes/auth")
 const chatRoutes = require("./routes/chat")
 const adminRoutes = require("./routes/admin")
+const preferencesRoutes = require("./routes/preferences")
 
 const app = express()
 const PORT = process.env.PORT || 5000
@@ -60,6 +62,7 @@ app.get("/api/health", async (req, res) => {
 app.use("/api/auth", authRoutes)
 app.use("/api/chat", chatRoutes)
 app.use("/api/admin", adminRoutes)
+app.use("/api/preferences", preferencesRoutes)
 
 // Error handling middleware
 app.use((err, req, res, next) => {
@@ -78,6 +81,36 @@ const startServer = async () => {
   try {
     await initDB()
     console.log("Database initialized successfully")
+
+    // Load model settings from database on startup
+    try {
+      let settings = await AdminSettings.findOne({ setting_type: "model_settings" })
+      if (settings) {
+        global.modelSettings = settings.toObject()
+        delete global.modelSettings._id
+        delete global.modelSettings.__v
+        delete global.modelSettings.setting_type
+        delete global.modelSettings.created_at
+        delete global.modelSettings.updated_at
+        console.log("Model settings loaded from database")
+      } else {
+        // Initialize with defaults if not found
+        global.modelSettings = {
+          responseTimeout: 60,
+          contextWindowSize: 8,
+          maxResponseLength: 2000,
+        }
+        console.log("Using default model settings")
+      }
+    } catch (err) {
+      console.warn("Failed to load model settings from database:", err.message)
+      // Initialize with defaults as fallback
+      global.modelSettings = {
+        responseTimeout: 60,
+        contextWindowSize: 8,
+        maxResponseLength: 2000,
+      }
+    }
 
     const ollamaReady = await LLMService.isHealthy()
     if (ollamaReady) {

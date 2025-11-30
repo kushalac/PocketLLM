@@ -19,7 +19,7 @@ export default function Login() {
     try {
       // Attempt login
       await AuthService.login(username, password)
-      navigate("/chat")
+      navigate("/")
     } catch (err) {
       const errorMessage = err.response?.data?.error || err.message || "Login failed"
       setError(errorMessage)

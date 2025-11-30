@@ -1,6 +1,32 @@
 const { v4: uuidv4 } = require("uuid")
+const natural = require("natural")
 const Document = require("../models/Document")
 const CacheService = require("./CacheService")
+
+
+const TfIdf = natural.TfIdf
+const tokenizer = new natural.WordTokenizer()
+const stemmer = natural.PorterStemmer
+
+// Stopwords for English
+const stopwords = new Set(natural.stopwords)
+
+
+const extraStopwords = new Set([
+  "tell", "give", "know", "think", "want", "like", "please", "thanks",
+  "help", "need", "would", "could", "should", "can", "may", "might"
+])
+
+/**
+ * Tokenize and stem text, removing stopwords
+ */
+function extractTerms(text) {
+  return tokenizer
+    .tokenize(text.toLowerCase())
+    .filter((word) => word.length > 2)
+    .filter((word) => !stopwords.has(word) && !extraStopwords.has(word))
+    .map((word) => stemmer.stem(word))
+}
 
 class DocumentService {
   async createDocument(userId, { title, content, tags = [], source = "manual" }) {
@@ -52,56 +78,66 @@ class DocumentService {
     const docs = await Document.find({ user_id: userId })
     if (!docs.length) return []
 
-    const terms = (query || "")
-      .toLowerCase()
-      .split(/\s+/)
-      .filter(Boolean)
-      .map((term) => term.replace(/[^a-z0-9-]/g, ""))
-      .filter(Boolean)
+    // Extract meaningful terms from query (stemmed, no stopwords)
+    const queryTerms = extractTerms(query || "")
+    if (!queryTerms.length) return []
 
-    const requiredMatches = terms.length ? Math.max(1, Math.ceil(terms.length * 0.4)) : 0
+    // Build TF-IDF index (create new for each search(embedding))
+    const tfidf = new TfIdf()
+    docs.forEach((doc) => {
+      tfidf.addDocument(`${doc.title} ${doc.title} ${doc.content}`) // Title weighted 2x
+    })
 
-    const scored = docs
-      .map((doc) => {
-        const contentLower = doc.content.toLowerCase()
-        let score = 0
-        terms.forEach((term) => {
-          if (contentLower.includes(term)) score += 1
-        })
-        if (!terms.length) score = 1
-        if (!terms.length && !doc.content) {
-          return null
+    // Score each document (based on query terms)
+    const scored = []
+    const minScore = 0.3 // Minimum TF-IDF score threshold
+
+    docs.forEach((doc, idx) => {
+      let totalScore = 0
+      let matchedTerms = []
+
+      // Get TF-IDF score for each query term
+      queryTerms.forEach((term) => {
+        const termScore = tfidf.tfidf(term, idx)
+        if (termScore > 0) {
+          totalScore += termScore
+          matchedTerms.push(term)
         }
-
-        if (!terms.length || score > 0) {
-          const idx = terms.reduce((acc, term) => {
-            const i = term ? contentLower.indexOf(term) : -1
-            if (i !== -1 && (acc === -1 || i < acc)) return i
-            return acc
-          }, -1)
-          const snippetStart = idx === -1 ? 0 : Math.max(0, idx - 80)
-          const snippetEnd = idx === -1 ? Math.min(200, doc.content.length) : Math.min(doc.content.length, idx + 120)
-          const snippet = doc.content.slice(snippetStart, snippetEnd)
-
-          return {
-            documentId: doc._id,
-            title: doc.title,
-            snippet,
-            source: doc.source,
-            citation: doc.title,
-            confidence: terms.length ? Math.min(1, score / terms.length) : 0.5,
-            score,
-          }
-        }
-
-        return null
       })
-      .filter(Boolean)
-      .filter((item) => {
-        if (!terms.length) return true
-        return item.score >= requiredMatches
+
+      // Normalize score by number of query terms
+      const normalizedScore = totalScore / queryTerms.length
+
+      // Skip low relevance
+      if (normalizedScore < minScore || matchedTerms.length === 0) return
+
+      // Calculate confidence (what % of query terms matched)
+      const confidence = matchedTerms.length / queryTerms.length
+
+      // Need at least 50% of terms to match
+      if (confidence < 0.5) return
+
+
+      const contentLower = doc.content.toLowerCase()
+      const firstMatch = matchedTerms[0]
+      const idx_match = contentLower.indexOf(stemmer.stem(firstMatch)) 
+      const snippetStart = idx_match === -1 ? 0 : Math.max(0, idx_match - 80)
+      const snippetEnd = idx_match === -1 ? Math.min(200, doc.content.length) : Math.min(doc.content.length, idx_match + 120)
+      const snippet = doc.content.slice(snippetStart, snippetEnd)
+
+      scored.push({
+        documentId: doc._id,
+        title: doc.title,
+        snippet,
+        source: doc.source,
+        citation: doc.title,
+        confidence: Math.round(confidence * 100) / 100,
+        score: normalizedScore,
       })
-      .sort((a, b) => b.score - a.score)
+    })
+
+    // Sort by score descending
+    scored.sort((a, b) => b.score - a.score)
 
     return scored.slice(0, limit).map(({ score, ...rest }) => rest)
   }

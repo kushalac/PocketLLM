@@ -7,8 +7,23 @@ class LLMService {
   }
 
   async *streamResponse(prompt, options = {}) {
-    const { systemPrompt = "You are a helpful AI assistant.", signal } = options
+    const { systemPrompt = "You are a helpful AI assistant.", signal, timeout = 300000, contextWindowSize, maxResponseLength } = options
     try {
+      // Build Ollama options from model settings
+      const ollamaOptions = {}
+      
+      // contextWindowSize maps to num_ctx (context window in tokens)
+      // Each message is roughly 50-100 tokens, so 8 messages = ~500-800 tokens context
+      // We use a multiplier to ensure enough context
+      if (contextWindowSize) {
+        ollamaOptions.num_ctx = contextWindowSize * 128 // ~128 tokens per message average
+      }
+      
+      // maxResponseLength maps to num_predict (max tokens to generate)
+      if (maxResponseLength) {
+        ollamaOptions.num_predict = Math.ceil(maxResponseLength / 4) // ~4 chars per token
+      }
+
       const response = await axios.post(
         this.ollamaUrl,
         {
@@ -16,10 +31,11 @@ class LLMService {
           prompt: prompt,
           stream: true,
           system: systemPrompt,
+          ...(Object.keys(ollamaOptions).length > 0 && { options: ollamaOptions }),
         },
         {
           responseType: "stream",
-          timeout: 300000, // 5 minutes timeout
+          timeout: timeout, // Use configurable timeout (defaults to 5 minutes if not provided)
           signal,
         },
       )

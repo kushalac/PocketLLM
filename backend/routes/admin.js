@@ -7,6 +7,8 @@ const {
   clearCache,
   clearLogs,
   resetMetrics,
+  updateModelSettings,
+  getModelSettings,
 } = require("../controllers/adminController")
 
 const router = express.Router()
@@ -17,5 +19,7 @@ router.get("/cache", adminMiddleware, getCacheStats)
 router.delete("/cache", adminMiddleware, clearCache)
 router.delete("/logs", adminMiddleware, clearLogs)
 router.post("/metrics/reset", adminMiddleware, resetMetrics)
+router.get("/model-settings", adminMiddleware, getModelSettings)
+router.post("/model-settings", adminMiddleware, updateModelSettings)
 
 module.exports = router

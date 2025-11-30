@@ -1,289 +1,203 @@
-# PocketLLM Portal
+# PocketLLM
 
-A full-stack AI chat application with Ollama LLM integration, MongoDB persistence, user authentication, and admin dashboard.
+A full-stack AI chat application with Ollama LLM integration, MongoDB persistence, JWT authentication, and admin dashboard for configuring global model settings.
 
 ## Features
 
-- **Ollama LLM Integration**: Run Llama 2 or other models locally for AI responses
-- **MongoDB Persistence**: Secure data storage with MongoDB Atlas support
-- **User Authentication**: JWT-based register/login system
-- **Chat Sessions**: Create, rename, delete, and export conversations
-- **Real-time Streaming**: SSE streaming for smooth chat responses
-- **Admin Dashboard**: Monitor metrics, logs, and system stats
-- **Docker Support**: Complete Docker Compose setup with all services
-
-## Database
-
-**MongoDB** is used for persistent storage with Mongoose ODM.
-
-- **Options**: MongoDB Atlas (cloud) or local MongoDB
-- **Collections**: users, chat_sessions, messages, logs
-- **Docker**: MongoDB container auto-initialized with credentials
-- **Connection**: `MONGODB_URI` environment variable
-
-## Tech Stack
-
-### Frontend
-- React 18
-- React Router v6
-- Axios
-- TailwindCSS (responsive styling)
-
-### Backend
-- Node.js + Express
-- **MongoDB** with Mongoose ODM
-- **Ollama** LLM API integration
-- JWT Authentication
-- Server-Sent Events (SSE) for streaming
-
-### Infrastructure
-- Docker & Docker Compose
-- Ollama container with Llama 2 7B Chat model
+- ✅ **AI Chat** - Real-time chat with Llama 2 LLM via Ollama
+- ✅ **Sessions** - Create, organize, and export conversations
+- ✅ **Admin Dashboard** - Configure global model settings for all users
+- ✅ **Authentication** - JWT-based register/login system
+- ✅ **MongoDB** - Persistent storage with Mongoose ODM
+- ✅ **Docker** - Complete Docker Compose setup with all services
+- ✅ **Caching** - Multi-tier caching (IndexedDB → Memory → DB)
 
 ## Quick Start
 
 ### Prerequisites
 - Docker & Docker Compose (recommended)
-- Node.js 20+ (for local development)
+- Or Node.js 20+ for local development
 
-### Option 1: Docker Compose (Recommended)
+### Start with Docker (Recommended)
 
-\`\`\`bash
+```bash
 cd backend
 docker-compose up --build
-\`\`\`
+```
 
-Services start at:
+Access at:
 - Frontend: http://localhost:3000
-- Backend: http://localhost:5000
+- Backend API: http://localhost:5000
 - Ollama: http://localhost:11434
-- MongoDB: localhost:27017 (internal)
 
-First startup takes 2-5 minutes (Ollama downloads ~4GB Llama 2 model).
+**First startup takes 2-5 minutes** (Ollama downloads ~4GB Llama 2 model)
 
-### Option 2: Local Development
+### Local Development
 
 **Terminal 1 - Backend:**
-\`\`\`bash
+```bash
 cd backend
 npm install
 cp .env.example .env
-# Update MONGODB_URI in .env
 npm run dev
-\`\`\`
+```
 
 **Terminal 2 - Frontend:**
-\`\`\`bash
+```bash
 cd frontend
 npm install
 npm start
-\`\`\`
+```
 
-## Environment Configuration
+## Configuration
 
 ### Backend (.env)
-\`\`\`bash
+```bash
 PORT=5000
 NODE_ENV=development
 JWT_SECRET=dev_secret_key_change_in_production
 MONGODB_URI=mongodb://root:password@localhost:27017/pocketllm?authSource=admin
 OLLAMA_URL=http://localhost:11434/api/generate
 OLLAMA_MODEL=llama2:7b-chat
-\`\`\`
+```
 
 ### Frontend (.env)
-\`\`\`
+```
 REACT_APP_API_URL=http://localhost:5000/api
-\`\`\`
+```
 
-## MongoDB Setup
+## Tech Stack
 
-### Local MongoDB
-\`\`\`bash
-# Install MongoDB or use Docker
-docker run -d -p 27017:27017 -e MONGO_INITDB_ROOT_USERNAME=root -e MONGO_INITDB_ROOT_PASSWORD=password mongo:7.0
-\`\`\`
+| Layer | Technology |
+|-------|------------|
+| **Frontend** | React 18, React Router, Axios, TailwindCSS |
+| **Backend** | Node.js, Express, MongoDB, Mongoose |
+| **LLM** | Ollama with Llama 2 7B Chat |
+| **Infrastructure** | Docker, Docker Compose |
 
-### MongoDB Atlas (Production)
-1. Create account at [atlas.mongodb.com](https://atlas.mongodb.com)
-2. Create cluster and get connection string
-3. Update `MONGODB_URI` with production credentials
+## Admin Dashboard
 
-## Ollama Configuration
+**Access**: Go to `/admin` (admin users only)
 
-### Using Default Model
-The setup automatically uses `llama2:7b-chat`. To use a different model:
+### Global Model Settings
 
-\`\`\`bash
-# Pull different model
-docker-compose exec ollama ollama pull mistral:7b
+Configure settings that apply to **all users**:
+- Response Timeout (10-300 seconds)
+- Cache TTL (30-3600 seconds)
+- Quality Threshold (0-1)
+- Request Throttle (10-1000 per minute)
+- Context Window Size (1-20 messages)
+- Max Response Length (500-8000 tokens)
 
-# Update .env
-OLLAMA_MODEL=mistral:7b
-\`\`\`
+When admin changes a setting, all users see it immediately on next request.
 
-### Popular Models
-- `llama2:7b-chat` - Default, balanced performance
-- `neural-chat:7b` - Faster responses (~10s)
-- `mistral:7b` - Better quality (~15s)
-- `llama2:13b-chat` - More powerful (~40s, requires 25GB)
+**For detailed admin documentation**: See [ADMIN_SETTINGS.md](./ADMIN_SETTINGS.md)
+
+## Project Structure
+
+```
+frontend/                 # React app
+├── src/features/        # Chat, Auth, Admin
+└── src/components/      # UI components
+
+backend/                 # Express API
+├── models/             # MongoDB schemas
+├── controllers/        # Route handlers
+├── services/          # Business logic
+├── routes/            # API endpoints
+├── middleware/        # Auth, validation
+└── db/                # Database connection
+
+ADMIN_SETTINGS.md       # Admin dashboard guide
+SETUP.md               # Detailed setup
+docker-compose.yml     # All services
+```
+
+## API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/health` | Service status |
+| `POST` | `/api/auth/register` | Create account |
+| `POST` | `/api/auth/login` | Login user |
+| `POST` | `/api/chat/start-session` | New chat |
+| `POST` | `/api/chat/message` | Send message (SSE) |
+| `GET` | `/api/admin/model-settings` | Get global settings |
+| `POST` | `/api/admin/model-settings` | Update settings (admin only) |
 
 ## Troubleshooting
 
 ### Ollama not connecting
-\`\`\`bash
-# Check Ollama status
+```bash
+# Check Ollama is running
 curl http://localhost:11434/api/tags
 
-# Restart Ollama service
+# Restart
 docker-compose restart ollama
-\`\`\`
+```
 
-### MongoDB connection failed
-\`\`\`bash
-# Verify credentials in .env match docker-compose.yml
-# Check MongoDB logs
-docker-compose logs mongodb
-\`\`\`
-
-### Signup/Login fails
-- Ensure backend is running on port 5000
-- Check browser console (F12) for errors
-- Verify MongoDB is connected: `curl http://localhost:5000/api/health`
-
-### No styling visible
-- Hard refresh browser (Ctrl+Shift+R)
-- Clear browser cache
-- Restart frontend
+### MongoDB connection error
+- Verify `.env` credentials match `docker-compose.yml`
+- Check logs: `docker-compose logs mongodb`
 
 ### Port already in use
-Change ports in `docker-compose.yml` or use custom project name:
-\`\`\`bash
-docker-compose -p custom_name up
-\`\`\`
+```bash
+# Use different project name
+docker-compose -p myproject up
+```
 
-## Project Structure
+### Can't login
+- Ensure backend is running: `curl http://localhost:5000/api/health`
+- Check browser console (F12) for errors
+- Verify MongoDB is connected
 
-\`\`\`
-.
-├── frontend/                 # React frontend
-│   ├── src/
-│   │   ├── core/
-│   │   ├── features/
-│   │   ├── components/
-│   │   └── index.jsx
-│   └── package.json
-│
-├── backend/                  # Node.js backend
-│   ├── models/               # New: Mongoose models
-│   │   ├── User.js
-│   │   ├── ChatSession.js
-│   │   ├── Message.js
-│   │   └── Log.js
-│   ├── services/
-│   │   ├── ChatService.js    # Updated for MongoDB
-│   │   ├── LLMService.js     # Updated for Ollama
-│   │   ├── CacheService.js
-│   │   ├── MetricsService.js
-│   │   └── LogService.js
-│   ├── controllers/
-│   ├── routes/
-│   ├── db/
-│   │   └── connection.js     # Updated for MongoDB
-│   ├── server.js             # Added health check
-│   └── package.json
-│
-├── MONGODB_OLLAMA_SETUP.md   # New: Detailed setup guide
-├── docker-compose.yml        # Added Ollama & MongoDB services
-├── README.md
-└── Dockerfile
-\`\`\`
+## Project Components
 
-## API Reference
+- **Frontend** - React app with chat interface, user settings, and admin dashboard
+- **Backend** - Express API with MongoDB models and Ollama integration
+- **Ollama** - Local LLM inference engine (Llama 2 7B Chat)
+- **MongoDB** - Persistent document storage
 
-### Health Check
-\`\`\`
-GET /api/health
-\`\`\`
+## Deployment
 
-Returns service status including Ollama connection.
+### Production MongoDB
+Use MongoDB Atlas: [https://atlas.mongodb.com](https://atlas.mongodb.com)
 
-### Authentication
-\`\`\`
-POST /api/auth/register
-POST /api/auth/login
-\`\`\`
+Update `.env`:
+```
+MONGODB_URI=mongodb+srv://user:password@cluster.mongodb.net/pocketllm
+```
 
-### Chat
-\`\`\`
-POST /api/chat/start-session
-GET /api/chat/sessions
-POST /api/chat/message          # SSE streaming
-PUT /api/chat/:sessionId/rename
-DELETE /api/chat/:sessionId
-GET /api/chat/:sessionId/export
-\`\`\`
+### Production Ollama
+Install Ollama on server: [https://ollama.ai](https://ollama.ai)
 
-### Admin
-\`\`\`
-GET /api/admin/metrics
-GET /api/admin/cache-stats
-GET /api/admin/logs
-\`\`\`
-
-## Docker Deployment
-
-\`\`\`bash
-cd backend
-docker-compose up --build
-\`\`\`
-
-Services:
-- **Frontend**: React app on port 3000
-- **Backend**: Express API on port 5000
-- **Ollama**: LLM inference on port 11434
-- **MongoDB**: Document database (internal)
-
-All services are configured to communicate automatically.
-
-## Production Deployment
-
-### MongoDB Atlas
-Set `MONGODB_URI` to your Atlas connection string:
-\`\`\`
-MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/pocketllm?retryWrites=true&w=majority
-\`\`\`
-
-### Ollama on Server
-Install Ollama and set:
-\`\`\`
+Update `.env`:
+```
 OLLAMA_URL=http://server-ip:11434/api/generate
-\`\`\`
+```
 
-### Security
-\`\`\`bash
-# Generate secure JWT secret
-openssl rand -base64 32
-
-# Set in environment
-JWT_SECRET=<generated-secret>
-NODE_ENV=production
-\`\`\`
+### Security Checklist
+- ✅ Generate strong JWT secret: `openssl rand -base64 32`
+- ✅ Set `NODE_ENV=production`
+- ✅ Use environment variables for all secrets
+- ✅ Enable HTTPS on frontend
+- ✅ Use MongoDB Atlas with IP whitelist
 
 ## Documentation
 
-- **MONGODB_OLLAMA_SETUP.md** - Detailed MongoDB & Ollama setup
-- **SETUP.md** - Comprehensive setup guide
-- **QUICK_START.md** - Quick reference
-
-## Support
-
-For issues:
-1. Check Troubleshooting section
-2. Review logs: `docker-compose logs -f`
-3. Check API health: `curl http://localhost:5000/api/health`
-4. See MONGODB_OLLAMA_SETUP.md for detailed guidance
+| Document | Purpose |
+|----------|---------|
+| `README.md` | This file - project overview |
+| `ADMIN_SETTINGS.md` | **Admin dashboard & global settings** |
+| `SETUP.md` | Detailed setup instructions |
+| `API_DOCUMENTATION.md` | Complete API reference |
 
 ## License
 
 MIT
+
+---
+
+**Last Updated**: November 2025  
+**Status**: Production Ready ✅
+
