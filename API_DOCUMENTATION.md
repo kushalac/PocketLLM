@@ -873,7 +873,3 @@ For issues or questions:
 4. File an issue on GitHub
 
 ---
-
-## License
-
-PocketLLM is licensed under the MIT License.
